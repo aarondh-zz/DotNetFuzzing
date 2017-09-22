@@ -14,9 +14,6 @@ namespace DotNetFuzzing
 {
     public class Fuzzer
     {
-        private const int BitsPerByte = 8;
-        private const int BitsPerInt16 = BitsPerByte * sizeof(Int16);
-        private const int BitsPerInt32 = BitsPerByte * sizeof(Int32);
         private long _seekTo;
         private Queue _queue;
         /// <summary>
@@ -31,8 +28,8 @@ namespace DotNetFuzzing
 
         private uint syncing_case;              /* Syncing with case #...           */
 
-        private uint stage_cur_byte;            /* Byte offset of current stage op  */
-        private uint stage_cur_val;            
+        private long stage_cur_byte;            /* Byte offset of current stage op  */
+        private int stage_cur_val;            
         private int _currentSkippedPaths;
         private ILogger _logger;
         private IFuzzerSettings _settings;
@@ -1080,7 +1077,7 @@ namespace DotNetFuzzing
         /// <param name="out_buf"></param>
         /// <param name="len"></param>
         /// <returns></returns>
-        private bool CommonFuzzStuff(BitStream out_buf, int length)
+        private bool CommonFuzzStuff(ByteStream out_buf, int length)
         {
 
             FuzzOutcomes fault;
@@ -1141,7 +1138,17 @@ namespace DotNetFuzzing
         {
             return (UInt16)((value << 8) | (value >> 8));
         }
+        private static UInt16 SWAP16(Int16 value)
+        {
+            return (UInt16)((value << 8) | (value >> 8));
+        }
         private static UInt32 SWAP32(UInt32 value)
+        {
+            return (UInt32)((value << 24) | (value >> 24) |
+              ((value << 8) & 0x00FF0000) |
+              ((value >> 8) & 0x0000FF00));
+        }
+        private static UInt32 SWAP32(Int32 value)
         {
             return (UInt32)((value << 24) | (value >> 24) |
               ((value << 8) & 0x00FF0000) |
@@ -1176,7 +1183,7 @@ namespace DotNetFuzzing
                     if (len == 2)
                     {
                         UInt16* pointer = (UInt16*)bytePointer;
-                        i = Constants.INTERESTING_16.Length >> 1;
+                        i = Constants.INTERESTING_16.Length;
 
                         while (i-- > 0)
                             if (*pointer == Constants.INTERESTING_16[i] ||
@@ -1188,7 +1195,7 @@ namespace DotNetFuzzing
                     {
                         UInt32* pointer = (UInt32*)bytePointer;
 
-                        i = Constants.INTERESTING_32.Length >> 2;
+                        i = Constants.INTERESTING_32.Length;
 
                         while (i-- > 0)
                         {
@@ -1318,6 +1325,215 @@ namespace DotNetFuzzing
 
         }
         /// <summary>
+        /// Helper function to see if a particular change (xor_val = old ^ new) could
+        /// be a product of deterministic bit flips with the lengths and stepovers
+        /// attempted by afl-fuzz.This is used to avoid dupes in some of the
+        /// deterministic fuzzing operations that follow bit flips.We also
+        /// return true if xor_val is zero, which implies that the old and attempted new
+        /// values are identical and the exec would be a waste of time.
+        /// </summary>
+        /// <param name="xor_val"></param>
+        /// <returns></returns>
+        private static bool could_be_bitflip(UInt32 xor_val)
+        {
+
+            UInt32 sh = 0;
+
+            if (xor_val == 0) return true;
+
+            /* Shift left until first bit set. */
+
+            while ((xor_val & 1) == 0) { sh++; xor_val >>= 1; }
+
+            /* 1-, 2-, and 4-bit patterns are OK anywhere. */
+
+            if (xor_val == 1 || xor_val == 3 || xor_val == 15) return true;
+
+            /* 8-, 16-, and 32-bit patterns are OK only if shift factor is
+               divisible by 8, since that's the stepover for these ops. */
+
+            if ((sh & 7)!=0) return false;
+
+            if (xor_val == 0xff || xor_val == 0xffff || xor_val == 0xffffffff)
+                return true;
+
+            return false;
+
+        }
+        /// <summary>
+        /// Helper function to see if a particular value is reachable through
+        /// arithmetic operations.Used for similar purposes.
+        /// </summary>
+        /// <param name="old_val"></param>
+        /// <param name="new_val"></param>
+        /// <param name="blen"></param>
+        /// <returns></returns>
+        private static bool could_be_arith(UInt32 old_val, UInt32 new_val, byte blen)
+        {
+
+            UInt32 ov = 0, nv = 0, diffs = 0;
+
+            if (old_val == new_val) return true;
+
+            /* See if one-byte adjustments to any byte could produce this result. */
+
+            for (int i = 0; i < blen; i++)
+            {
+
+                byte a = (byte)( old_val >> (8 * i)),
+                   b = (byte)(new_val >> (8 * i));
+
+                if (a != b) { diffs++; ov = a; nv = b; }
+
+            }
+
+            /* If only one byte differs and the values are within range, return 1. */
+
+            if (diffs == 1)
+            {
+
+                if ((byte)(ov - nv) <= Constants.ARITH_MAX ||
+                    (byte)(nv - ov) <= Constants.ARITH_MAX) return true;
+
+            }
+
+            if (blen == 1) return false;
+
+            /* See if two-byte adjustments to any byte would produce this result. */
+
+            diffs = 0;
+
+            for (int i = 0; i < blen / 2; i++)
+            {
+
+                UInt16 a = (UInt16)(old_val >> (16 * i)),
+                    b = (UInt16)(new_val >> (16 * i));
+
+                if (a != b) { diffs++; ov = a; nv = b; }
+
+            }
+
+            /* If only one word differs and the values are within range, return 1. */
+
+            if (diffs == 1)
+            {
+
+                if ((UInt16)(ov - nv) <= Constants.ARITH_MAX ||
+                    (UInt16)(nv - ov) <= Constants.ARITH_MAX) return true;
+
+                ov = SWAP16((UInt16)ov); nv = SWAP16((UInt16)nv);
+
+                if ((UInt16)(ov - nv) <= Constants.ARITH_MAX ||
+                    (UInt16)(nv - ov) <= Constants.ARITH_MAX) return true;
+
+            }
+
+            /* Finally, let's do the same thing for dwords. */
+
+            if (blen == 4)
+            {
+
+                if ((UInt32)(old_val - new_val) <= Constants.ARITH_MAX ||
+                    (UInt32)(new_val - old_val) <= Constants.ARITH_MAX) return true;
+
+                new_val = SWAP32(new_val);
+                old_val = SWAP32(old_val);
+
+                if ((UInt32)(old_val - new_val) <= Constants.ARITH_MAX ||
+                    (UInt32)(new_val - old_val) <= Constants.ARITH_MAX) return true;
+
+            }
+
+            return false;
+
+        }
+
+
+        /// <summary>
+        /// Last but not least, a similar helper to see if insertion of an 
+        /// interesting integer is redundant given the insertions done for
+        /// shorter blen.The last param (check_le) is set if the caller
+        /// already executed LE insertion for current blen and wants to see
+        /// if BE variant passed in new_val is unique.
+        /// /// </summary>
+        /// <param name="old_val"></param>
+        /// <param name="new_val"></param>
+        /// <param name="blen"></param>
+        /// <param name="check_le"></param>
+        /// <returns></returns>
+
+        public static bool could_be_interest(UInt32 old_val, UInt32 new_val, byte blen, bool check_le)
+        {
+
+            if (old_val == new_val) return true;
+
+            /* See if one-byte insertions from interesting_8 over old_val could
+               produce new_val. */
+
+            for (int i = 0; i < blen; i++)
+            {
+
+                for (int j = 0; j < Constants.INTERESTING_8.Length; j++)
+                {
+
+                    UInt32 tval = (UInt32)((old_val & ~(0xff << (i * 8))) |
+                               (Constants.INTERESTING_8[j] << (i * 8)));
+
+                    if (new_val == tval) return true;
+
+                }
+
+            }
+
+            /* Bail out unless we're also asked to examine two-byte LE insertions
+               as a preparation for BE attempts. */
+
+            if (blen == 2 && !check_le) return false;
+
+            /* See if two-byte insertions over old_val could give us new_val. */
+
+            for (int i = 0; i < blen - 1; i++)
+            {
+
+                for (int j = 0; j < Constants.INTERESTING_16.Length; j++)
+                {
+
+                    UInt32 tval = (UInt32)((old_val & ~(0xffff << (i * 8))) |
+                               (Constants.INTERESTING_16[j] << (i * 8)));
+
+                    if (new_val == tval) return true;
+
+                    /* Continue here only if blen > 2. */
+
+                    if (blen > 2)
+                    {
+
+                        tval = (UInt32)((old_val & ~(0xffff << (i * 8))) |
+                               (SWAP16(Constants.INTERESTING_16[j]) << (i * 8)));
+
+                        if (new_val == tval) return true;
+
+                    }
+
+                }
+
+            }
+
+            if (blen == 4 && check_le)
+            {
+
+                /* See if four-byte insertions could produce the same result
+                   (LE only). */
+
+                for (int j = 0; j < Constants.INTERESTING_32.Length; j++)
+                    if (new_val == Constants.INTERESTING_32[j]) return true;
+
+            }
+
+            return false;
+
+        }
+        /// <summary>
         /// Take the current entry from the queue, fuzz it for a while. This function is a tad too long... 
         /// returns true if fuzzed successfully, false if skipped or bailed out. */
         /// </summary>
@@ -1408,7 +1624,7 @@ namespace DotNetFuzzing
                single byte anyway, so it wouldn't give us any performance or memory usage
                benefits. */
 
-            var out_buf = new BitStream(length * BitsPerByte);
+            var out_buf = new ByteStream(length);
             var subseq_tmouts = 0;
             var cur_depth = currentQueue.Depth;
 
@@ -1510,7 +1726,7 @@ namespace DotNetFuzzing
             stage_name = "bitflip 1/1";
 
             var stage_val_type = StageValueTypes.STAGE_VAL_NONE;
-            int stage_cur_byte = uint.MaxValue;
+            int stage_cur_byte = -1;
 
             orig_hit_cnt = _queue.Count + unique_crashes;
 
@@ -1696,7 +1912,7 @@ namespace DotNetFuzzing
             for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
                 stage_cur_byte = stage_cur;
-                out_buf.Seek(stage_cur * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(stage_cur, SeekOrigin.Begin);
                 out_buf.Xor( 0xFF );
 
                 if (CommonFuzzStuff(out_buf, length)) goto abandon_entry;
@@ -1724,7 +1940,7 @@ namespace DotNetFuzzing
                     }
 
                 }
-                out_buf.Seek(stage_cur * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(stage_cur, SeekOrigin.Begin);
                 out_buf.Xor(0xFF);
 
             }
@@ -1774,7 +1990,7 @@ namespace DotNetFuzzing
                 }
 
                 stage_cur_byte = i;
-                out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFF);
                 if (CommonFuzzStuff(out_buf, length)) goto abandon_entry;
                 stage_cur++;
@@ -1808,13 +2024,13 @@ namespace DotNetFuzzing
                 }
 
                 stage_cur_byte = i;
-                out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFFFFFF);
 
                 if (CommonFuzzStuff(out_buf, length)) goto abandon_entry;
                 stage_cur++;
 
-                out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFFFFFF);
 
             }
@@ -1924,7 +2140,7 @@ namespace DotNetFuzzing
 
                 stage_cur_byte = i;
 
-                for (var j = 1; j <= Constants.ARITH_MAX; j++) {
+                for (int j = 1; j <= Constants.ARITH_MAX; j++) {
 
                     UInt16 r1 = (UInt16)(orig ^ (orig + j)),
                         r2 = (UInt16)(orig ^ (orig - j)),
@@ -2026,10 +2242,10 @@ namespace DotNetFuzzing
 
                 for (var j = 1; j <= Constants.ARITH_MAX; j++) {
 
-                    uint r1 = orig ^ (orig + j),
-                        r2 = orig ^ (orig - j),
-                        r3 = orig ^ SWAP32(SWAP32(orig) + j),
-                        r4 = orig ^ SWAP32(SWAP32(orig) - j);
+                    UInt32 r1 = (UInt32)( orig ^ (orig + j)),
+                        r2 = (UInt32)(orig ^ (orig - j)),
+                        r3 = (UInt32)(orig ^ SWAP32((UInt32)(SWAP32(orig) + j))),
+                        r4 = (UInt32)(orig ^ SWAP32((UInt32)(SWAP32(orig) - j)));
 
                     /* Little endian first. Same deal as with 16-bit: we only want to
                        try if the operation would have effect on more than two bytes. */
@@ -2040,7 +2256,7 @@ namespace DotNetFuzzing
 
                         stage_cur_val = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
-                        out_buf.Write((UInt32)orig + j, 1);
+                        out_buf.Write((UInt32)(orig + j), 1);
 
                         if (CommonFuzzStuff(out_buf, length)) goto abandon_entry;
                         stage_cur++;
@@ -2051,7 +2267,7 @@ namespace DotNetFuzzing
 
                         stage_cur_val = -j;
                         out_buf.Seek(i, SeekOrigin.Begin);
-                        out_buf.Write((UInt32)orig - j, 1);
+                        out_buf.Write((UInt32)(orig - j), 1);
 
                         if (CommonFuzzStuff(out_buf, length)) goto abandon_entry;
                         stage_cur++;
@@ -2131,7 +2347,7 @@ namespace DotNetFuzzing
 
                     /* Skip if the value could be a product of bitflips or arithmetics. */
 
-                    if (could_be_bitflip(orig ^ (byte)Constants.INTERESTING_8[j]) ||
+                    if (could_be_bitflip((UInt32)(orig ^ (byte)Constants.INTERESTING_8[j])) ||
                         could_be_arith(orig, (byte)Constants.INTERESTING_8[j], 1)) {
                         stage_max--;
                         continue;
@@ -2163,7 +2379,7 @@ namespace DotNetFuzzing
             stage_name = "interest 16/8";
             stage_short = "int16";
             stage_cur = 0;
-            stage_max = 2 * (length - 1) * (Constants.INTERESTING_16.Length >> 1);
+            stage_max = 2 * (length - 1) * (Constants.INTERESTING_16.Length);
 
             orig_hit_cnt = new_hit_cnt;
 
@@ -2181,16 +2397,16 @@ namespace DotNetFuzzing
 
                 stage_cur_byte = i;
 
-                for (int j = 0; j < Constants.INTERESTING_16.Length / 2; j++) {
+                for (int j = 0; j < Constants.INTERESTING_16.Length; j++) {
 
                     stage_cur_val = Constants.INTERESTING_16[j];
 
                     /* Skip if this could be a product of a bitflip, arithmetics,
                        or single-byte interesting value insertion. */
 
-                    if (!could_be_bitflip(orig ^ (UInt16)Constants.INTERESTING_16[j]) &&
+                    if (!could_be_bitflip((UInt32)(orig ^ (UInt16)Constants.INTERESTING_16[j])) &&
                         !could_be_arith(orig, (UInt16)Constants.INTERESTING_16[j], 2) &&
-                        !could_be_interest(orig, (UInt16)Constants.INTERESTING_16[j], 2, 0)) {
+                        !could_be_interest(orig, (UInt16)Constants.INTERESTING_16[j], 2, false)) {
 
                         stage_val_type = StageValueTypes.STAGE_VAL_LE;
 
@@ -2205,7 +2421,7 @@ namespace DotNetFuzzing
                     if ((UInt16)Constants.INTERESTING_16[j] != SWAP16(Constants.INTERESTING_16[j]) &&
                         !could_be_bitflip(orig ^ SWAP16(Constants.INTERESTING_16[j])) &&
                         !could_be_arith(orig, SWAP16(Constants.INTERESTING_16[j]), 2) &&
-                        !could_be_interest(orig, SWAP16(Constants.INTERESTING_16[j]), 2, 1)) {
+                        !could_be_interest(orig, SWAP16(Constants.INTERESTING_16[j]), 2, true)) {
 
                         stage_val_type = StageValueTypes.STAGE_VAL_BE;
 
@@ -2235,7 +2451,7 @@ namespace DotNetFuzzing
             stage_name = "interest 32/8";
             stage_short = "int32";
             stage_cur = 0;
-            stage_max = 2 * (length - 3) * (Constants.INTERESTING_32.Length >> 2);
+            stage_max = 2 * (length - 3) * (Constants.INTERESTING_32.Length);
 
             orig_hit_cnt = new_hit_cnt;
 
@@ -2254,16 +2470,16 @@ namespace DotNetFuzzing
 
                 stage_cur_byte = i;
 
-                for (int j = 0; j < Constants.INTERESTING_32.Length / 4; j++) {
+                for (int j = 0; j < Constants.INTERESTING_32.Length; j++) {
 
                     stage_cur_val = Constants.INTERESTING_32[j];
 
                     /* Skip if this could be a product of a bitflip, arithmetics,
                        or word interesting value insertion. */
 
-                    if (!could_be_bitflip(orig ^ (uint)Constants.INTERESTING_32[j]) &&
-                        !could_be_arith(orig, Constants.INTERESTING_32[j], 4) &&
-                        !could_be_interest(orig, Constants.INTERESTING_32[j], 4, 0)) {
+                    if (!could_be_bitflip(orig ^ (UInt32)Constants.INTERESTING_32[j]) &&
+                        !could_be_arith(orig, (UInt32)Constants.INTERESTING_32[j], 4) &&
+                        !could_be_interest(orig, (UInt32)Constants.INTERESTING_32[j], 4, false)) {
 
                         stage_val_type = StageValueTypes.STAGE_VAL_LE;
 
@@ -2275,10 +2491,10 @@ namespace DotNetFuzzing
 
                     } else stage_max--;
 
-                    if ((uint)Constants.INTERESTING_32[j] != SWAP32(Constants.INTERESTING_32[j]) &&
-                        !could_be_bitflip(orig ^ SWAP32(Constants.INTERESTING_32[j])) &&
-                        !could_be_arith(orig, SWAP32(Constants.INTERESTING_32[j]), 4) &&
-                        !could_be_interest(orig, SWAP32(Constants.INTERESTING_32[j]), 4, 1)) {
+                    if ((UInt32)Constants.INTERESTING_32[j] != SWAP32((UInt32)Constants.INTERESTING_32[j]) &&
+                        !could_be_bitflip(orig ^ SWAP32((UInt32)Constants.INTERESTING_32[j])) &&
+                        !could_be_arith(orig, SWAP32((UInt32)Constants.INTERESTING_32[j]), 4) &&
+                        !could_be_interest(orig, SWAP32((UInt32)Constants.INTERESTING_32[j]), 4, true)) {
 
                         stage_val_type = StageValueTypes.STAGE_VAL_BE;
 
@@ -2324,7 +2540,7 @@ namespace DotNetFuzzing
 
                 int last_len = 0;
 
-                stage_cur_byte = (uint)i;
+                stage_cur_byte = i;
 
                 /* Extras are sorted by size, from smallest to largest. This means
                    that we don't have to worry about restoring the buffer in
@@ -2349,7 +2565,7 @@ namespace DotNetFuzzing
                     }
 
                     last_len = this._extras[j].Length;
-                    out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                    out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.Write(in_buf, 0, _extras[j].Length);
 
                     if (CommonFuzzStuff( out_buf, length)) goto abandon_entry;
@@ -2359,7 +2575,7 @@ namespace DotNetFuzzing
                 }
 
                 /* Restore all the clobbered memory. */
-                out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Write(in_buf, i, last_len);
 
             }
@@ -2378,7 +2594,7 @@ namespace DotNetFuzzing
 
             orig_hit_cnt = new_hit_cnt;
 
-            BitStream ex_tmp = new BitStream((length + Constants.MAX_DICT_FILE)* BitsPerByte);
+            ByteStream ex_tmp = new ByteStream((length + Constants.MAX_DICT_FILE)* BitsPerByte);
 
             for (int i = 0; i <= length; i++) {
 
@@ -2391,7 +2607,7 @@ namespace DotNetFuzzing
                     }
 
                     /* Insert token */
-                    ex_tmp.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                    ex_tmp.Seek(i, SeekOrigin.Begin);
                     ex_tmp.Write(_extras[j].Data, 0, _extras[j].Length);
 
                     /* Copy tail */
@@ -2408,9 +2624,9 @@ namespace DotNetFuzzing
 
                 /* Copy head */
                 byte[] head = new byte[1];
-                out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Read(head, 0, 1);
-                ex_tmp.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                ex_tmp.Seek(i, SeekOrigin.Begin);
                 out_buf.Write(head, 0, 1);
 
             }
@@ -2455,7 +2671,7 @@ namespace DotNetFuzzing
                     }
 
                     last_len = _autoExtras[j].Length;
-                    out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                    out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.Write(_autoExtras[j].Data, 0, last_len);
 
                     if (CommonFuzzStuff(out_buf, length)) goto abandon_entry;
@@ -2465,7 +2681,7 @@ namespace DotNetFuzzing
                 }
 
                 /* Restore all the clobbered memory. */
-                out_buf.Seek(i * BitsPerByte, SeekOrigin.Begin);
+                out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Write(in_buf, i, last_len);
 
             }
@@ -2512,7 +2728,7 @@ namespace DotNetFuzzing
             if (stage_max < Constants.HAVOC_MIN) stage_max = Constants.HAVOC_MIN;
 
             var temp_len = length;
-            BitStream new_buf;
+            ByteStream new_buf;
 
             orig_hit_cnt = _queue.Count + unique_crashes;
 
@@ -2541,7 +2757,7 @@ namespace DotNetFuzzing
                         case 1:
 
                             /* Set byte to interesting value. */
-                            out_buf.Seek(Randomize(temp_len) * BitsPerByte, SeekOrigin.Begin);
+                            out_buf.Seek(Randomize(temp_len), SeekOrigin.Begin);
                             out_buf.Write(Constants.INTERESTING_8,Randomize(Constants.INTERESTING_8.Length),1);
                             break;
 
@@ -2552,13 +2768,13 @@ namespace DotNetFuzzing
                             if (temp_len < 2) break;
 
                             if (Randomize(2)>0) {
-                                out_buf.Seek(Randomize(temp_len - 1) * BitsPerByte, SeekOrigin.Begin);
-                                out_buf.Write((UInt16)(Constants.INTERESTING_16[Randomize(Constants.INTERESTING_16.Length>>1)]), 1);
+                                out_buf.Seek(Randomize(temp_len - 1), SeekOrigin.Begin);
+                                out_buf.Write((UInt16)(Constants.INTERESTING_16[Randomize(Constants.INTERESTING_16.Length)]), 1);
 
                             } else {
 
-                                out_buf.Seek(Randomize(temp_len - 1) * BitsPerByte, SeekOrigin.Begin);
-                                out_buf.Write(SWAP16((UInt16)Constants.INTERESTING_16[Randomize(Constants.INTERESTING_16.Length >> 1)]), 1);
+                                out_buf.Seek(Randomize(temp_len - 1), SeekOrigin.Begin);
+                                out_buf.Write(SWAP16((UInt16)Constants.INTERESTING_16[Randomize(Constants.INTERESTING_16.Length)]), 1);
                             }
 
                             break;
@@ -2572,13 +2788,13 @@ namespace DotNetFuzzing
                             if (Randomize(2)>0) {
 
 
-                                out_buf.Seek(Randomize(temp_len - 3) * BitsPerByte, SeekOrigin.Begin);
-                                out_buf.Write((UInt32)Constants.INTERESTING_32[Randomize(Constants.INTERESTING_32.Length >> 2)], 1);
+                                out_buf.Seek(Randomize(temp_len - 3), SeekOrigin.Begin);
+                                out_buf.Write((UInt32)Constants.INTERESTING_32[Randomize(Constants.INTERESTING_32.Length)], 1);
 
                             } else {
 
-                                out_buf.Seek(Randomize(temp_len - 3) * BitsPerByte, SeekOrigin.Begin);
-                                out_buf.Write(SWAP32((UInt32)Constants.INTERESTING_32[Randomize(Constants.INTERESTING_32.Length >> 2)]), 1);
+                                out_buf.Seek(Randomize(temp_len - 3), SeekOrigin.Begin);
+                                out_buf.Write(SWAP32((UInt32)Constants.INTERESTING_32[Randomize(Constants.INTERESTING_32.Length)]), 1);
 
                             }
 
@@ -2700,13 +2916,13 @@ namespace DotNetFuzzing
                                    than insertion (the next option) in hopes of keeping
                                    files reasonably small. */
 
-                                uint del_from, del_len;
+                                int del_from, del_len;
 
                                 if (temp_len < 2) break;
 
                                 /* Don't delete too much. */
 
-                                del_len = choose_block_len(temp_len - 1);
+                                del_len = choose_block_len(temp_len - 1, _queueCycle);
 
                                 del_from = Randomize(temp_len - del_len + 1);
 
@@ -2742,7 +2958,7 @@ namespace DotNetFuzzing
 
                                 clone_to = Randomize(temp_len);
 
-                                new_buf = new BitStream((temp_len + clone_len)*BitsPerByte);
+                                new_buf = new ByteStream(temp_len + clone_len);
 
                                 /* Head */
                                 new_buf.WriteBytes(out_buf, 0, clone_to);
@@ -2755,7 +2971,7 @@ namespace DotNetFuzzing
                                 }
                                 else if ( Randomize(2) == 0)
                                 {
-                                    out_buf.Seek(Randomize(temp_len) * BitsPerByte, SeekOrigin.Begin);
+                                    out_buf.Seek(Randomize(temp_len), SeekOrigin.Begin);
                                     byte[] randomFromOutBuf = new byte[1];
                                     out_buf.Read(randomFromOutBuf, 0, 1);
                                     new_buf.Write(randomFromOutBuf, 0, clone_len);
@@ -2789,7 +3005,7 @@ namespace DotNetFuzzing
                                 copy_from = Randomize(temp_len - copy_len + 1);
                                 copy_to = Randomize(temp_len - copy_len + 1);
 
-                                out_buf.Seek(copy_to * BitsPerByte, SeekOrigin.Begin);
+                                out_buf.Seek(copy_to, SeekOrigin.Begin);
 
                                 if (Randomize(4) != 0)
                                 {
@@ -2834,7 +3050,7 @@ namespace DotNetFuzzing
                                     if (extra_len > temp_len) break;
 
                                     insert_at = Randomize(temp_len - extra_len + 1);
-                                    out_buf.Seek(insert_at * BitsPerByte, SeekOrigin.Begin);
+                                    out_buf.Seek(insert_at, SeekOrigin.Begin);
                                     out_buf.Write(_autoExtras[use_extra].Data, 0, extra_len);
 
                                 } else {
@@ -2848,7 +3064,7 @@ namespace DotNetFuzzing
                                     if (extra_len > temp_len) break;
 
                                     insert_at = Randomize(temp_len - extra_len + 1);
-                                    out_buf.Seek(insert_at * BitsPerByte, SeekOrigin.Begin);
+                                    out_buf.Seek(insert_at, SeekOrigin.Begin);
                                     out_buf.Write(_extras[use_extra].Data, 0, extra_len);
 
                                 }
@@ -2871,7 +3087,7 @@ namespace DotNetFuzzing
 
                                     if (temp_len + extra_len >= Constants.MAX_FILE) break;
 
-                                    new_buf = new BitStream((temp_len + extra_len)*BitsPerByte);
+                                    new_buf = new ByteStream(temp_len + extra_len);
 
                                     /* Head */
                                     new_buf.WriteBytes(out_buf, 0, insert_at);
@@ -2886,7 +3102,7 @@ namespace DotNetFuzzing
 
                                     if (temp_len + extra_len >= Constants.MAX_FILE) break;
 
-                                    new_buf = new BitStream((temp_len + extra_len) * BitsPerByte);
+                                    new_buf = new ByteStream(temp_len + extra_len);
 
                                     /* Head */
                                     new_buf.WriteBytes(out_buf, 0, insert_at);
@@ -2985,7 +3201,7 @@ namespace DotNetFuzzing
                     target = queue;
 
                     while (tid >= 100) { target = target.Next100; tid -= 100; }
-                    while (tid--) target = target.Next;
+                    while (tid-- > 0) target = target.Next;
 
                     /* Make sure that the target has a reasonable length. */
 
@@ -3002,7 +3218,7 @@ namespace DotNetFuzzing
 
                     if (fd < 0) PFATAL("Unable to open '%s'", target.FileName);
 
-                    new_buf = new BitStream(target.Length * BitsPerByte);
+                    new_buf = new ByteStream(target.Length);
 
                     ck_read(fd, new_buf, target.Length, target.FileName);
 
@@ -3031,7 +3247,7 @@ namespace DotNetFuzzing
                     in_buf = new_buf.GetBytes();
 
                     out_buf.Dispose();
-                    out_buf =  new BitStream(length * BitsPerByte);
+                    out_buf =  new ByteStream(length);
                     out_buf.Write(in_buf, 0, length);
 
                     goto havoc_stage;
