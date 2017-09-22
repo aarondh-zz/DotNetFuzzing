@@ -110,6 +110,7 @@
     <Compile Include="Fuzzer.cs" />
     <Compile Include="FuzzerStatistics.cs" />
     <Compile Include="Internal\Models\ByteStream.cs" />
+    <Compile Include="Internal\Models\EffectorMap.cs" />
     <Compile Include="Internal\Models\ExtraData.cs" />
     <Compile Include="Internal\Models\Queue.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

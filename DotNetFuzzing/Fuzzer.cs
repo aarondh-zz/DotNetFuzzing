@@ -807,6 +807,8 @@ namespace DotNetFuzzing
         private int queued_variable;
         private bool auto_changed;
         private int _queued_discovered;
+        private int blocks_eff_select;
+        private int blocks_eff_total;
 
         /// <summary>
         ///         Describe integer. Uses 12 cyclic static buffers for return values.
@@ -1877,29 +1879,10 @@ namespace DotNetFuzzing
             stage_finds[(int)FuzzingStages.STAGE_FLIP4] += new_hit_cnt - orig_hit_cnt;
             stage_cycles[(int)FuzzingStages.STAGE_FLIP4] += stage_max;
 
-            /* Effector map setup. These macros calculate:
-
-               EFF_APOS      - position of a particular file offset in the map.
-               EFF_ALEN      - length of a map with a particular number of bytes.
-               EFF_SPAN_ALEN - map span for a sequence of bytes.
-
-             */
-
-            // #define EFF_APOS(_p)          ((_p) >> EFF_MAP_SCALE2)
-            // #define EFF_REM(_x)           ((_x) & ((1 << EFF_MAP_SCALE2) - 1))
-            // #define EFF_ALEN(_l)          (EFF_APOS(_l) + !!EFF_REM(_l))
-            // #define EFF_SPAN_ALEN(_p, _l) (EFF_APOS((_p) + (_l) - 1) - EFF_APOS(_p) + 1)
-
             /* Initialize effector map for the next step (see comments below). Always
                flag first and last byte as doing something. */
 
-            eff_map = ck_alloc(EFF_ALEN(length));
-            eff_map[0] = 1;
-
-            if (EFF_APOS(length - 1) != 0) {
-                eff_map[EFF_APOS(length - 1)] = 1;
-                eff_cnt++;
-            }
+            EffectorMap eff_map = new EffectorMap(length);
 
             /* Walking byte. */
 
@@ -1922,7 +1905,7 @@ namespace DotNetFuzzing
                    even when fully flipped - and we skip them during more expensive
                    deterministic stages, such as arithmetics or known ints. */
 
-                if (!eff_map[EFF_APOS(stage_cur)]) {
+                if (eff_map.HasNoEffect(stage_cur)) {
 
                     uint cksum;
 
@@ -1935,8 +1918,7 @@ namespace DotNetFuzzing
                         cksum = ~currentQueue.ExecutionTraceChecksum;
 
                     if (cksum != currentQueue.ExecutionTraceChecksum) {
-                        eff_map[EFF_APOS(stage_cur)] = 1;
-                        eff_cnt++;
+                        eff_map[stage_cur] = 1;
                     }
 
                 }
@@ -1949,20 +1931,14 @@ namespace DotNetFuzzing
                whole thing as worth fuzzing, since we wouldn't be saving much time
                anyway. */
 
-            if (eff_cnt != EFF_ALEN(length) &&
-                eff_cnt * 100 / EFF_ALEN(length) > EFF_MAX_PERC) {
+            if (eff_map.IsMaxDensity) {
 
-                memset(eff_map, 1, EFF_ALEN(length));
-
-                blocks_eff_select += EFF_ALEN(length);
-
-            } else {
-
-                blocks_eff_select += eff_cnt;
+                eff_map.MarkAll();
 
             }
+            blocks_eff_select += eff_map.Count;
 
-            blocks_eff_total += EFF_ALEN(length);
+            blocks_eff_total += eff_map.Length;
 
             new_hit_cnt = _queue.Count + unique_crashes;
 
@@ -1984,7 +1960,7 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
+                if (eff_map.HasNoEffect(i) && eff_map.HasNoEffect(i + 1)) {
                     stage_max--;
                     continue;
                 }
@@ -2017,8 +1993,8 @@ namespace DotNetFuzzing
             for (int i = 0; i < length - 3; i++) {
 
                 /* Let's consult the effector map... */
-                if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)] &&
-                    !eff_map[EFF_APOS(i + 2)] && !eff_map[EFF_APOS(i + 3)]) {
+                if (eff_map.HasNoEffect(i) && eff_map.HasNoEffect(i + 1) &&
+                    eff_map.HasNoEffect(i + 2) && eff_map.HasNoEffect(i + 3)) {
                     stage_max--;
                     continue;
                 }
@@ -2065,7 +2041,7 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)]) {
+                if (eff_map.HasNoEffect(i)) {
                     stage_max -= 2 * Constants.ARITH_MAX;
                     continue;
                 }
@@ -2133,7 +2109,7 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
+                if (eff_map.HasNoEffect(i) && eff_map.HasNoEffect(i + 1)) {
                     stage_max -= 4 * Constants.ARITH_MAX;
                     continue;
                 }
@@ -2232,8 +2208,8 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)] &&
-                    !eff_map[EFF_APOS(i + 2)] && !eff_map[EFF_APOS(i + 3)]) {
+                if (eff_map.HasNoEffect(i) && eff_map.HasNoEffect(i + 1) &&
+                    eff_map.HasNoEffect(i + 2) && eff_map.HasNoEffect(i + 3)) {
                     stage_max -= 4 * Constants.ARITH_MAX;
                     continue;
                 }
@@ -2336,7 +2312,7 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)]) {
+                if (eff_map.HasNoEffect(i)) {
                     stage_max -= Constants.INTERESTING_8.Length;
                     continue;
                 }
@@ -2390,7 +2366,7 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
+                if (eff_map.HasNoEffect(i) && eff_map.HasNoEffect(i + 1)) {
                     stage_max -= Constants.INTERESTING_16.Length;
                     continue;
                 }
@@ -2419,7 +2395,7 @@ namespace DotNetFuzzing
                     } else stage_max--;
 
                     if ((UInt16)Constants.INTERESTING_16[j] != SWAP16(Constants.INTERESTING_16[j]) &&
-                        !could_be_bitflip(orig ^ SWAP16(Constants.INTERESTING_16[j])) &&
+                        !could_be_bitflip((UInt32)(orig ^ SWAP16(Constants.INTERESTING_16[j]))) &&
                         !could_be_arith(orig, SWAP16(Constants.INTERESTING_16[j]), 2) &&
                         !could_be_interest(orig, SWAP16(Constants.INTERESTING_16[j]), 2, true)) {
 
@@ -2462,8 +2438,8 @@ namespace DotNetFuzzing
 
                 /* Let's consult the effector map... */
 
-                if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)] &&
-                    !eff_map[EFF_APOS(i + 2)] && !eff_map[EFF_APOS(i + 3)]) {
+                if (eff_map.HasNoEffect(i) && eff_map.HasNoEffect(i + 1) &&
+                    eff_map.HasNoEffect(i + 2) && eff_map.HasNoEffect(i + 3)) {
                     stage_max -= Constants.INTERESTING_32.Length >> 1;
                     continue;
                 }
@@ -2556,8 +2532,8 @@ namespace DotNetFuzzing
 
                     if ((this._extras.Count > Constants.MAX_DET_EXTRAS && Randomize(this._extras.Count) >= Constants.MAX_DET_EXTRAS) ||
                         this._extras[j].Length > length - i ||
-                        !memcmp(this._extras[j].Data, out_buf + i, this._extras[j].Length) ||
-                        !memchr(eff_map + EFF_APOS(i), 1, EFF_SPAN_ALEN(i, this._extras[j].Length))) {
+                        out_buf.Equal(this._extras[j].Data, i, 0, this._extras[j].Length) ||
+                        eff_map.HasNoEffect(i, this._extras[j].Length)) {
 
                         stage_max--;
                         continue;
@@ -2594,7 +2570,7 @@ namespace DotNetFuzzing
 
             orig_hit_cnt = new_hit_cnt;
 
-            ByteStream ex_tmp = new ByteStream((length + Constants.MAX_DICT_FILE)* BitsPerByte);
+            ByteStream ex_tmp = new ByteStream(length + Constants.MAX_DICT_FILE);
 
             for (int i = 0; i <= length; i++) {
 
@@ -2662,8 +2638,8 @@ namespace DotNetFuzzing
                     /* See the comment in the earlier code; extras are sorted by size. */
 
                     if (_autoExtras[j].Length > length - i ||
-                        !memcmp(_autoExtras[j].Data, out_buf + i, _autoExtras[j].Length) ||
-                        !memchr(eff_map + EFF_APOS(i), 1, EFF_SPAN_ALEN(i, _autoExtras[j].Length))) {
+                        out_buf.Equal(_autoExtras[j].Data, i, 0, _autoExtras[j].Length) ||
+                        eff_map.HasNoEffect(i, _autoExtras[j].Length)) {
 
                         stage_max--;
                         continue;
@@ -3271,11 +3247,9 @@ namespace DotNetFuzzing
                 if (currentQueue.Favored) pending_favored--;
             }
 
-            munmap(orig_in, currentQueue.Length);
-
             if (in_buf != orig_in) ck_free(in_buf);
             out_buf.Dispose();
-            ck_free(eff_map);
+            eff_map.Dispose();
 
             return returnValue;
 

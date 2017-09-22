@@ -291,6 +291,29 @@ namespace DotNetFuzzing.Internal.Models
                 }
             }
         }
+        public bool Equal(byte[] values, long position, int offset, int count)
+        {
+            if (position + count >= _length)
+            {
+                return false;
+            }
+            unsafe
+            {
+                fixed (UInt32* uint32p = &_buffer[0])
+                {
+                    byte* pointer = (byte*)uint32p + position;
+                    while (count-- > 0)
+                    {
+                        if (*(pointer++) != values[offset++])
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            }
+        }
         public void Write(UInt32 value, int count)
         {
             int byteCount = count * sizeof(UInt32);
