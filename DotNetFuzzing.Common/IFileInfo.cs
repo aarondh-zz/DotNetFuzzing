@@ -9,6 +9,6 @@ namespace DotNetFuzzing.Common
     public interface IFileInfo
     {
         DateTime LastWriteTime { get; }
-        int Length { get; }
+        long Length { get; }
     }
 }

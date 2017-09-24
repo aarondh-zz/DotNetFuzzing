@@ -3700,7 +3700,7 @@ namespace DotNetFuzzing
 
                     var passedDeterministic = _settings.FileSystem.FileExists(deterministicFileName);
 
-                    _queue.Add(path, fileInfo.Length, passedDeterministic);
+                    _queue.Add(path, (int)fileInfo.Length, passedDeterministic);
 
                 }
 
@@ -3740,12 +3740,14 @@ namespace DotNetFuzzing
 
         private void SetupDirsFds()
         {
-            throw new NotImplementedException();
+            if ( !_settings.FileSystem.DirectoryExists(_settings.OutputDirectory))
+            {
+                _settings.FileSystem.CreateDirectory(_settings.OutputDirectory);
+            }
         }
 
         private void InitCountClass16()
         {
-            throw new NotImplementedException();
         }
 
         private void SetupShm()
@@ -3755,22 +3757,18 @@ namespace DotNetFuzzing
 
         private void SetupPost()
         {
-            throw new NotImplementedException();
         }
 
         private void CheckCpuGovernor()
         {
-            throw new NotImplementedException();
         }
 
         private void CheckCrashHandling()
         {
-            throw new NotImplementedException();
         }
 
         private void GetCoreCount()
         {
-            throw new NotImplementedException();
         }
 
         private void FixUpSync()
@@ -3780,12 +3778,10 @@ namespace DotNetFuzzing
 
         private void SetupSignalHandlers()
         {
-            throw new NotImplementedException();
         }
 
         private void CheckAsanOptions()
         {
-            throw new NotImplementedException();
         }
     }
 }
