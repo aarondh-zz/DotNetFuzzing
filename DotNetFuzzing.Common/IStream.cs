@@ -13,6 +13,7 @@ namespace DotNetFuzzing.Common
         void Flush();
         int Read(byte[] buffer, int offset, int count);
         int Write(byte[] buffer, int offset, int count);
+        int Write(string text);
         string ReadToEnd(Encoding encoding);
 
         long Length { get;  }

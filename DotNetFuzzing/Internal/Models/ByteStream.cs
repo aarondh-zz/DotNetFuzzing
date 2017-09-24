@@ -12,14 +12,20 @@ namespace DotNetFuzzing.Internal.Models
         public const int BitsPerByte = 8;
         public const int BitsPerInt16 = BitsPerByte * sizeof(Int16);
         public const int BitsPerInt32 = BitsPerByte * sizeof(Int32);
-        private const int DefaultMinimumCapacityGrowth = sizeof(Int32);
         private long _length;
         private long _position;
-        private UInt32[] _buffer;
-        public ByteStream( long capacity = 0)
+        private byte[] _bytes;
+        public ByteStream(long capacity = 0)
         {
-            MinimumCapacityGrowth = DefaultMinimumCapacityGrowth;
-            SetLength(capacity * BitsPerInt32);
+            SetLength(capacity);
+        }
+        public ByteStream(byte[] bytes)
+        {
+            if ( bytes != null )
+            {
+                SetLength(bytes.Length);
+            }
+            Array.Copy(bytes, _bytes, bytes.Length);
         }
         public override bool CanRead => true;
 
@@ -31,7 +37,7 @@ namespace DotNetFuzzing.Internal.Models
         {
             if ( disposing )
             {
-                _buffer = null;
+                _bytes = null;
                 _length = 0;
                 _position = 0;
             }
@@ -77,9 +83,9 @@ namespace DotNetFuzzing.Internal.Models
                 fixed (byte* inp = &buffer[offset])
                 {
                     byte* inBytep = inp;
-                    fixed (UInt32* uint32p = &_buffer[0])
+                    fixed (byte* fixedBytePtr = &_bytes[0])
                     {
-                        byte* bytep = (byte*)uint32p + _position;
+                        byte* bytep = fixedBytePtr + _position;
                         _position += count;
                         while (count-- > 0)
                         {
@@ -119,24 +125,19 @@ namespace DotNetFuzzing.Internal.Models
         public override void SetLength(long value)
         {
             _length = value;
-            var actualLength = _length / sizeof(UInt32);
-            if (_length % sizeof(UInt32) != 0 )
+            if (_bytes == null)
             {
-                actualLength++;
+                _bytes = new byte[_length];
             }
-            if (_buffer == null)
-            {
-                _buffer = new UInt32[actualLength];
-            }
-            else if (actualLength <= _buffer.Length)
+            else if (_length <= _bytes.Length)
             {
                 return; //shrinking... 
             }
             else
             {
-                var origBuffer = _buffer;
-                _buffer = new UInt32[actualLength];
-                Array.Copy(origBuffer, _buffer, origBuffer.Length);
+                var origBuffer = _bytes;
+                _bytes = new byte[_length];
+                Array.Copy(origBuffer, _bytes, origBuffer.Length);
             }
         }
         public override void Write(byte[] buffer, int offset, int count)
@@ -145,17 +146,9 @@ namespace DotNetFuzzing.Internal.Models
             {
                 SetLength(_position + count);
             }
-            unsafe
+            while (count-- > 0)
             {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* bytep = (byte*)uint32p + _position;
-                    _position += count;
-                    while (count-- > 0)
-                    {
-                        *(bytep++) = buffer[offset++];
-                    }
-                }
+                _bytes[_position++] = buffer[offset++];
             }
         }
         public void WriteBytes(ByteStream source, long position, int count)
@@ -167,22 +160,51 @@ namespace DotNetFuzzing.Internal.Models
             unsafe
             {
                 long maxInLength = source._length;
-                fixed (UInt32* inp = &source._buffer[0])
+                fixed (byte* fixedSourcePtr = &source._bytes[0])
                 {
-                    byte* byteinp = (byte*)inp + position;
-                    fixed (UInt32* outp = &_buffer[0])
+                    byte* inp = fixedSourcePtr + position;
+                    fixed (byte* fixedBytePtr = &_bytes[0])
                     {
-                        byte* byteoutp = (byte*)outp + _position;
+                        byte* outp = fixedBytePtr + _position;
+                        if (this == source && (_position >= position || _position + count > position))
+                        {
+                            //source and destination are the same and the input bytes overlap the output bytes
+                            //we need an intermediate buffer
+                            byte[] temp = new byte[count];
+                            fixed (byte* fixedTempPtr = &temp[0])
+                            {
+                                byte* pointer = fixedTempPtr;
+                                var bytesToMove = count;
+                                while (bytesToMove-- > 0)
+                                {
+                                    if (inp - fixedSourcePtr < maxInLength)
+                                    {
+                                        *(pointer++) = *(inp++);
+                                    }
+                                    else
+                                    {
+                                        *(pointer++) = 0;
+                                    }
+                                }
+                                pointer = fixedTempPtr;
+                                _position += count;
+                                while (count-- > 0)
+                                {
+                                    *(outp++) = *(pointer++);
+                                }
+                            }
+                            return;
+                        }
                         _position += count;
                         while (count-- > 0)
                         {
                             if (position++ < maxInLength)
                             {
-                                *(byteoutp++) = *(byteinp++);
+                                *(outp++) = *(inp++);
                             }
                             else
                             {
-                                *(byteoutp++) = 0;
+                                *(outp++) = 0;
                             }
                         }
                     }
@@ -191,38 +213,23 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Write(UInt32[] buffer, int offset, int count)
         {
-            if (_position + count * sizeof(UInt32) >= _length)
+            int byteCount = count * sizeof(UInt32);
+            if (_position + byteCount >= _length)
             {
-                SetLength(_position + count * sizeof(UInt32));
+                SetLength(_position + byteCount);
             }
-            if (_position % sizeof(UInt32) == 0)
+            unsafe
             {
-                //writing on a int32 boundary
-                var i = _position / BitsPerInt32;
-                var j = 0;
-                _position += i;
-                while (count-- > 0)
+                fixed (UInt32* inp = &buffer[offset])
                 {
-                    _buffer[i++] = buffer[j++];
-                }
-            }
-            else
-            {
-                //writing on a byte boundary
-                unsafe
-                {
-                    int byteCount = count * sizeof(UInt32);
-                    fixed (UInt32* inp = &buffer[offset])
+                    byte* inbytep = (byte*)inp;
+                    fixed (byte* fixedBytePtr = &_bytes[0])
                     {
-                        byte* inbytep = (byte*)inp;
-                        fixed (UInt32* uint32p = &_buffer[0])
+                        byte* bytep = fixedBytePtr + _position;
+                        _position += byteCount;
+                        while (byteCount-- > 0)
                         {
-                            byte* bytep = (byte*)uint32p + _position;
-                            _position += byteCount;
-                            while (byteCount-- > 0)
-                            {
-                                *(bytep++) = *(inbytep++);
-                            }
+                            *(bytep++) = *(inbytep++);
                         }
                     }
                 }
@@ -240,9 +247,9 @@ namespace DotNetFuzzing.Internal.Models
                 fixed (UInt16* inp = &buffer[offset])
                 {
                     byte* inbytep = (byte*)inp;
-                    fixed (UInt32* uint32p = &_buffer[0])
+                    fixed (byte* fixedBytePtr = &_bytes[0])
                     {
-                        byte* bytep = (byte*)uint32p + _position;
+                        byte* bytep = fixedBytePtr + _position;
                         _position += byteCount;
                         while (byteCount-- > 0)
                         {
@@ -258,17 +265,9 @@ namespace DotNetFuzzing.Internal.Models
             {
                 SetLength(_position + count);
             }
-            unsafe
+            while (count-- > 0)
             {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* bytep = (byte*)uint32p + _position;
-                    _position += count;
-                    while (count-- > 0)
-                    {
-                        *(bytep++) = value;
-                    }
-                }
+                _bytes[_position++] = value;
             }
         }
         public void Write(UInt16 value, int count)
@@ -280,9 +279,9 @@ namespace DotNetFuzzing.Internal.Models
             }
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* uint16 = (UInt16*)uint32p + _position;
+                    UInt16* uint16 = (UInt16*)fixedBytePtr + _position;
                     _position += byteCount;
                     while (byteCount-- > 0)
                     {
@@ -297,22 +296,15 @@ namespace DotNetFuzzing.Internal.Models
             {
                 return false;
             }
-            unsafe
+            var i = 0;
+            while (count-- > 0)
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                if (_bytes[i] != values[i++])
                 {
-                    byte* pointer = (byte*)uint32p + position;
-                    while (count-- > 0)
-                    {
-                        if (*(pointer++) != values[offset++])
-                        {
-                            return false;
-                        }
-                    }
+                    return false;
                 }
-
-                return true;
             }
+            return true;
         }
         public void Write(UInt32 value, int count)
         {
@@ -323,9 +315,9 @@ namespace DotNetFuzzing.Internal.Models
             }
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* uintp = (UInt32*)uint32p + _position;
+                    UInt32* uintp = (UInt32*)fixedBytePtr + _position;
                     _position += byteCount;
                     while (byteCount-- > 0)
                     {
@@ -342,15 +334,16 @@ namespace DotNetFuzzing.Internal.Models
             {
                 SetLength(length);
             }
-            int intOffset = (int)(position / BitsPerInt32);
-            int bitOffset = (int)(position % BitsPerInt32);
+            int intOffset = (int)(position / BitsPerByte);
+            int bitOffset = (int)(position % BitsPerByte);
+            byte bitMask = (byte)(0x80 >> bitOffset);
             if (bit)
             {
-                _buffer[intOffset] |= 0x80000000 >> bitOffset;
+                _bytes[intOffset] |= bitMask;
             }
             else
             {
-                _buffer[intOffset] &= ~(0x80000000 >> bitOffset);
+                _bytes[intOffset] &= (byte)~bitMask;
             }
         }
 
@@ -363,35 +356,28 @@ namespace DotNetFuzzing.Internal.Models
             }
             else
             {
-                int intOffset = (int)(position / BitsPerInt32);
-                int bitOffset = (int)(position % BitsPerInt32);
-                _position++;
-                return (_buffer[intOffset] & ~(0x80000000 >> bitOffset)) != 0;
+                int intOffset = (int)(position / BitsPerByte);
+                int bitOffset = (int)(position % BitsPerByte);
+                byte bitMask = (byte)(0x80 >> bitOffset);
+                return (_bytes[intOffset] & ~bitMask) != 0;
             }
         }
-        public void FlipBit(long bitToFlip)
+        public void FlipBit(long position)
         {
-            int byteIndex = (int)(bitToFlip / BitsPerByte);
+            int byteIndex = (int)(position / BitsPerByte);
+            int bitOffset = (int)(position % BitsPerByte);
             if (byteIndex <= _length)
             {
                 SetLength(byteIndex);
             }
-            int intOffset = (int)(byteIndex * sizeof(UInt32));
-            int bitOffset = (int)(bitToFlip % BitsPerInt32);
-            _buffer[intOffset] |= (_buffer[intOffset] & ~(0x80000000 >> bitOffset));
+            _bytes[byteIndex] |= (byte)(_bytes[byteIndex] & ~(0x80 >> bitOffset));
         }
 #endregion
         public new byte ReadByte()
         {
-            if (_position <= _length)
+            if (_position < _length)
             {
-                unsafe
-                {
-                    fixed (UInt32* pointer = &_buffer[0])
-                    {
-                        return *(((byte*)pointer) + _position++);
-                    }
-                }
+                return _bytes[_position++];
             }
             else
             {
@@ -400,12 +386,12 @@ namespace DotNetFuzzing.Internal.Models
         }
         public UInt16 ReadInt16()
         {
-            if (_position <= _length)
+            if (_position < _length)
             {
                 int byteIndex = (int)(_position * sizeof(UInt16));
                 unsafe
                 {
-                    fixed (UInt32* pointer = &_buffer[0])
+                    fixed (byte* pointer = &_bytes[0])
                     {
                         _position += sizeof(UInt16);
                         return *(((UInt16*)pointer) + byteIndex);
@@ -419,12 +405,12 @@ namespace DotNetFuzzing.Internal.Models
         }
         public UInt32 ReadInt32()
         {
-            if (_position <= _length)
+            if (_position < _length)
             {
                 int byteIndex = (int)(_position * sizeof(UInt32));
                 unsafe
                 {
-                    fixed (UInt32* pointer = &_buffer[0])
+                    fixed (byte* pointer = &_bytes[0])
                     {
                         _position += sizeof(UInt32);
                         return *(((UInt32*)pointer) + byteIndex);
@@ -440,23 +426,16 @@ namespace DotNetFuzzing.Internal.Models
         #region Xor
         public void Xor(byte value)
         {
-            unsafe
-            {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* pointer = (byte*)uint32p + _position;
-                    *pointer ^= value;
-                }
-            }
+            _bytes[_position] ^= value;
 
         }
         public void Xor(UInt16 value)
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)uint32p + _position;
+                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
                     *pointer ^= value;
                 }
             }
@@ -465,9 +444,9 @@ namespace DotNetFuzzing.Internal.Models
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
+                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
                     *pointer ^= value;
                 }
             }
@@ -477,22 +456,15 @@ namespace DotNetFuzzing.Internal.Models
         #region Add
         public void Add(byte value)
         {
-            unsafe
-            {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
-                    *pointer += value;
-                }
-            }
+            _bytes[_position] += value;
         }
         public void Add(UInt16 value)
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)uint32p + _position;
+                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
                     *pointer += value;
                 }
             }
@@ -501,9 +473,9 @@ namespace DotNetFuzzing.Internal.Models
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
+                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
                     *pointer += value;
                 }
             }
@@ -513,22 +485,15 @@ namespace DotNetFuzzing.Internal.Models
         #region Substract
         public void Substract(byte value)
         {
-            unsafe
-            {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* pointer = (byte*)uint32p + _position;
-                    *pointer -= value;
-                }
-            }
+            _bytes[_position] -= value;
         }
         public void Substract(UInt16 value)
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)uint32p + _position;
+                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
                     *pointer -= value;
                 }
             }
@@ -537,9 +502,9 @@ namespace DotNetFuzzing.Internal.Models
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
+                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
                     *pointer -= value;
                 }
             }
@@ -549,22 +514,15 @@ namespace DotNetFuzzing.Internal.Models
         #region And
         public void And(byte value)
         {
-            unsafe
-            {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* pointer = (byte*)uint32p + _position;
-                    *pointer &= value;
-                }
-            }
+            _bytes[_position] &= value;
         }
         public void And(UInt16 value)
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)uint32p + _position;
+                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
                     *pointer &= value;
                 }
             }
@@ -573,9 +531,9 @@ namespace DotNetFuzzing.Internal.Models
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
+                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
                     *pointer &= value;
                 }
             }
@@ -585,22 +543,15 @@ namespace DotNetFuzzing.Internal.Models
         #region Func
         public void Func(Func<byte,byte> func)
         {
-            unsafe
-            {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* pointer = (byte*)uint32p + _position;
-                    *pointer = func(*pointer);
-                }
-            }
+            _bytes[_position] = func(_bytes[_position]);
         }
         public void Func(Func<UInt16, UInt16> func)
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)uint32p + _position;
+                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
                     *pointer = func(*pointer);
                 }
             }
@@ -609,9 +560,9 @@ namespace DotNetFuzzing.Internal.Models
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
+                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
                     *pointer = func(*pointer);
                 }
             }
@@ -621,22 +572,15 @@ namespace DotNetFuzzing.Internal.Models
         #region Or
         public void Or(byte value)
         {
-            unsafe
-            {
-                fixed (UInt32* uint32p = &_buffer[0])
-                {
-                    byte* pointer = (byte*)uint32p + _position;
-                    *pointer |= value;
-                }
-            }
+            _bytes[_position] |= value;
         }
         public void Or(UInt16 value)
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)uint32p + _position;
+                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
                     *pointer |= value;
                 }
             }
@@ -645,9 +589,9 @@ namespace DotNetFuzzing.Internal.Models
         {
             unsafe
             {
-                fixed (UInt32* uint32p = &_buffer[0])
+                fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)uint32p + _position;
+                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
                     *pointer |= value;
                 }
             }
@@ -655,12 +599,7 @@ namespace DotNetFuzzing.Internal.Models
         #endregion
         public byte[] GetBytes()
         {
-            byte[] bytes = new byte[_length];
-            var currentPosition = _position;
-            Seek(0L, SeekOrigin.Begin);
-            Read(bytes, 0, bytes.Length);
-            Seek(currentPosition, SeekOrigin.Begin);
-            return bytes;
+            return _bytes;
         }
     }
 }

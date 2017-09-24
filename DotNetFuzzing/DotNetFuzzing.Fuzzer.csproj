@@ -115,6 +115,7 @@
     <Compile Include="Internal\Models\Queue.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Utilities\Hasher.cs" />
+    <Compile Include="Utilities\StringExtensions.cs" />
     <Compile Include="Utilities\TraceLogger.cs" />
     <EmbeddedResource Include="Properties\DotNetFuzzing.rd.xml" />
   </ItemGroup>

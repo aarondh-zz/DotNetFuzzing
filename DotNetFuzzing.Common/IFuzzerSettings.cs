@@ -74,5 +74,11 @@ namespace DotNetFuzzing.Common
         bool IgnoreFinds { get; }
         int StatsUpdateFrequency { get; set; }
         bool RunOver10M { get; }
+
+        bool ResumeFuzzing { get; }
+        bool ResumeInplace { get; }
+
+        bool FastCal { get; }
+        bool SimpleFiles { get; }
     }
 }

@@ -32,5 +32,13 @@ namespace DotNetFuzzing
         public string afl_banner { get; set; }
         public string afl_version { get; set; }
         public string command_line { get; set; }
+        public int TrimExecutions { get; internal set; }
+        public int total_crashes { get; internal set; }
+        public DateTime last_hang_time { get; internal set; }
+        public DateTime last_crash_time { get; internal set; }
+        public int last_crash_execs { get; internal set; }
+        public int total_executions { get; internal set; }
+        public int total_timeouts { get; internal set; }
+        public int unique_tmouts { get; internal set; }
     }
 }

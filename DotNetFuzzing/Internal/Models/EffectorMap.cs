@@ -46,7 +46,7 @@ namespace DotNetFuzzing.Internal.Models
         /// <returns></returns>
         private int EFF_ALEN(int value)
         {
-            return (EFF_APOS(value) + !!EFF_REM(value));
+            return (EFF_APOS(value) + EFF_REM(value));
         }
         /// <summary>
         /// map span for a sequence of bytes

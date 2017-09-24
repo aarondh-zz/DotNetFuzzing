@@ -1,6 +1,8 @@
 ﻿using DotNetFuzzing.Common;
+using DotNetFuzzing.Utilities;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -22,7 +24,11 @@ namespace DotNetFuzzing.Internal.Models
 
         public class QueueEntry
         {
-
+            private Queue _queue;
+            public QueueEntry(Queue queue)
+            {
+                _queue = queue;
+            }
             /// <summary>
             ///  File name for the test case
             /// </summary>
@@ -36,15 +42,94 @@ namespace DotNetFuzzing.Internal.Models
             /// </summary>
             public int CalibrationFailed { get; set; } 
             public bool TrimDone { get; set; }                     /* Trimmed?                         */
-            public bool WasFuzzed { get; set; }                     /* Had any fuzzing done yet?        */
+            private bool _wasFuzzed;
+            /// <summary>
+            /// Has any fuzzing been done yet?
+            /// </summary>
+            public bool WasFuzzed
+            {
+                get
+                {
+                    return _wasFuzzed;
+                }
+                set {
+                    if ( _wasFuzzed != value)
+                    {
+                        _wasFuzzed = value;
+                        _queue.PendingNotFuzzed += value ? -1 : 1;
+                    }
+                }
+            }
             public bool PassedDeterministic { get; set; }                     /* Deterministic stages passed?     */
             public bool HasNewCoverage { get; set; }                    /* Triggers new coverage?           */
             public bool VariableBehavior { get; set; }                  /* Variable behavior?               */
-            public bool Favored { get; set; }                       /* Currently favored?               */
-            public bool FsRedundant { get; set; }                   /* Marked as redundant in the fs?   */
             /// <summary>
-            /// Number of bits set in bitmap
+            /// Current favored?
             /// </summary>
+            private bool _favored;
+            public bool Favored
+            {
+                get
+                {
+                    return _favored;
+                }
+                set
+                {
+                    if ( _favored != value )
+                    {
+                        _queue.PendingFavored += value ? -1 : 1;
+                        _queue.Favored += value ? 1 : -1;
+                    }
+                }
+            }
+            public bool FsRedundant { get; set; }                   /* Marked as redundant in the fs?   */
+            public void MarkAsVariable(IFuzzerSettings settings)
+            {
+                string entryFileName = Path.GetFileName(FileName);
+                string destinationFileName = $"../../{entryFileName}";
+                string fileName = $"{settings.OutputDirectory}/queue/.state/variable_behavior/{entryFileName}";
+
+                using (var stream = settings.FileSystem.Open(fileName, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
+                {
+                    stream.Write(destinationFileName);
+                    stream.Flush();
+                }
+                this.VariableBehavior = true;
+            }
+            public void MarkAsRedundant(IFuzzerSettings settings)
+            {
+                var redundant = !this.Favored;
+                if (!redundant == this.FsRedundant) return;
+
+                this.FsRedundant = redundant;
+
+                var queueFileName = Path.GetFileName(this.FileName);
+
+                var filePath = $"{settings.OutputDirectory}/queue/.state/redundant_edges/{queueFileName}";
+
+                if (redundant)
+                {
+
+                    using (var stream = settings.FileSystem.Open(filePath, OpenOptions.WriteOnly | OpenOptions.Create | OpenOptions.Exclusive))
+                    {
+                        stream.Write($"../../../{queueFileName}");
+                        stream.Flush();
+                        stream.Close();
+                    }
+
+                }
+                else
+                {
+                    if (!settings.FileSystem.Delete(filePath))
+                    {
+                        var exception = new Exception($"Unable to remove '{filePath}'");
+                        settings.Logger.Fatal(exception, $"Unable to remove '{filePath}'", filePath);
+                        throw exception;
+                    }
+                }
+            }            /// <summary>
+                         /// Number of bits set in bitmap
+                         /// </summary>
             public int BitmapSize { get; set; }
             /// <summary>
             /// Checksum of the execution trace
@@ -76,12 +161,36 @@ namespace DotNetFuzzing.Internal.Models
             /// </summary>
             public QueueEntry Next { get; set; }
             public QueueEntry Next100 { get; set; }
-       }
+
+            internal void MarkAsDeterministicDone(IFuzzerSettings settings)
+            {
+                var queueFileName = Path.GetFileName(this.FileName);
+                string filePath = $"{settings.OutputDirectory}/queue/.state/deterministic_done/{queueFileName}";
+                using (var stream = settings.FileSystem.Open(filePath, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
+                {
+                    stream.Write($"../../{queueFileName}");
+                    stream.Flush();
+                    stream.Close();
+                }
+
+                this.PassedDeterministic = true;
+            }
+        }
+        public QueueEntry this[int index]
+        {
+            get
+            {
+                var target = this.First;
+                while (index >= 100) { target = target.Next100; index -= 100; }
+                while (index-- > 0) target = target.Next;
+                return target;
+            }
+        }
         public IFuzzerSettings Settings { get; }
         public QueueEntry Last { get; set; }
         public QueueEntry Previous100 { get; set; }
         public int Favored { get; private set; }
-        public int PendingFavored { get; set; }
+        public int PendingFavored { get; private set; }
         public QueueEntry First { get; private set; }
         public int Count { get; private set; }
         public int PendingNotFuzzed { get; private set; }
@@ -109,16 +218,16 @@ namespace DotNetFuzzing.Internal.Models
             }
 
             scoreChanged = false;
-            Favored = 0;
-            PendingFavored = 0;
 
-            q = this.Last;
+            q = this.First;
 
             while (q != null)
             {
                 q.Favored = false;
                 q = q.Next;
             }
+            Favored = 0;
+            PendingFavored = Count;
 
             /* Let's see if anything in the bitmap isn't captured in tempV.
                If yes, and if it has a topRated[] contender, let's use it. */
@@ -141,7 +250,6 @@ namespace DotNetFuzzing.Internal.Models
                     }
 
                     topRated[i].Favored = true;
-                    Favored++;
 
                     if (!topRated[i].WasFuzzed)
                     {
@@ -151,59 +259,18 @@ namespace DotNetFuzzing.Internal.Models
                 }
             }
 
-            q = this.Last;
+            q = this.First;
 
             while (q != null)
             {
-                MarkAsRedundant(q, !q.Favored);
+                q.MarkAsRedundant(Settings);
                 q = q.Next;
             }
         }
-        private string StringAfter(string text, char c)
-        {
-            if (text != null)
-            {
-                var sep = text.LastIndexOf(c);
-                if (sep >= 0)
-                {
-                    return text.Substring(sep + 1);
-                }
-            }
-            return null;
-        }
-
-        private void MarkAsRedundant(QueueEntry q, bool state)
-        {
-            if (state == q.FsRedundant) return;
-
-            q.FsRedundant = state;
-
-            var fileName = $"{Settings.OutputDirectory}/queue/.state/redundant_edges/{StringAfter(q.FileName, '/')}";
-
-            if (state)
-            {
-
-                var stream = Settings.FileSystem.Open(fileName, OpenOptions.WriteOnly | OpenOptions.Create | OpenOptions.Exclusive);
-                if (stream == null)
-                {
-                    var exception = new Exception($"Unable to create '{fileName}'");
-                }
-                stream.Close();
-
-            }
-            else
-            {
-                if (!Settings.FileSystem.Delete(fileName))
-                {
-                    var exception = new Exception($"Unable to remove '{fileName}'");
-                    Settings.Logger.Fatal(exception, $"Unable to remove '{fileName}'", fileName);
-                    throw exception;
-                }
-            }
-        }
+        
         public QueueEntry Add(string fileName, int length, bool passedDeterministic)
         {
-            var queueEntry = new QueueEntry
+            var queueEntry = new QueueEntry(this)
             {
                 FileName = fileName,
                 Length = length,
