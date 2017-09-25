@@ -77,7 +77,7 @@ namespace DotNetFuzzing.Common.Implementation
 
         public string Preload{ get; set; }
 
-        public TimeSpan HangTimeout{ get; set; }
+        public TimeSpan? HangTimeout{ get; set; }
 
         public string QemuBinaryFile{ get; set; }
 

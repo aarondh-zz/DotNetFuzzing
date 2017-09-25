@@ -62,7 +62,23 @@ namespace DotNetFuzzing.Internal.Models
             }
             public bool PassedDeterministic { get; set; }                     /* Deterministic stages passed?     */
             public bool HasNewCoverage { get; set; }                    /* Triggers new coverage?           */
-            public bool VariableBehavior { get; set; }                  /* Variable behavior?               */
+            private bool _variableBehaviour;
+            public bool VariableBehavior
+            {
+                get
+                {
+                    return _variableBehaviour;
+                }
+                set
+                {
+                    if (_variableBehaviour != value)
+                    {
+                        _variableBehaviour = value;
+                        _queue.VariableBehavior += value ? -1 : 1;
+                    }
+                }
+            }
+
             /// <summary>
             /// Current favored?
             /// </summary>
@@ -77,6 +93,7 @@ namespace DotNetFuzzing.Internal.Models
                 {
                     if ( _favored != value )
                     {
+                        _favored = value;
                         _queue.PendingFavored += value ? -1 : 1;
                         _queue.Favored += value ? 1 : -1;
                     }
@@ -213,6 +230,7 @@ namespace DotNetFuzzing.Internal.Models
         public QueueEntry First { get; private set; }
         public int Count { get; private set; }
         public int PendingNotFuzzed { get; private set; }
+        public int VariableBehavior { get; private set; }
 
         public Queue(IFuzzerSettings settings)
         {

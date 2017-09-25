@@ -824,7 +824,23 @@ namespace DotNetFuzzing
         /// </summary>
         /// <param name="val"></param>
         /// <returns>string describing the integer</returns>
-        private static string Describe(uint val)
+        private static string DescribeInteger(uint val)
+        {
+            return val.ToString();
+        }
+        private static string DescribeInteger(int val)
+        {
+            return val.ToString();
+        }
+        private static string DescribeInteger(long val)
+        {
+            return val.ToString();
+        }
+        private static string DescribeMemorySize( long val)
+        {
+            return val.ToString();
+        }
+        private static string DescribeFloat(float val)
         {
             return val.ToString();
         }
@@ -3655,7 +3671,6 @@ namespace DotNetFuzzing
                 q = q.Next;
 
             }
-#if never
             if (avg_us > (_settings.QueueMode ? 50000 : 10000))
             {
                 _settings.Logger.Warning($"The target binary is pretty slow! See {_settings.DocumentationDirectory}/perf_tips.txt.");
@@ -3670,13 +3685,11 @@ namespace DotNetFuzzing
             if (!_settings.ResumeFuzzing) {
 
                 if (max_len > 50 * 1024)
-                    _settings.Logger.Warning($"Some test cases are huge (%s) - see %s/perf_tips.txt!",
-        DMS(max_len), doc_path);
+                    _settings.Logger.Warning($"Some test cases are huge ({DescribeMemorySize(max_len)}) - see {_settings.DocumentationDirectory}/perf_tips.txt!");
                 else if (max_len > 10 * 1024)
-                    _settings.Logger.Warning($"Some test cases are big (%s) - see %s/perf_tips.txt.",
-        DMS(max_len), doc_path);
+                    _settings.Logger.Warning($"Some test cases are big ({DescribeMemorySize(max_len)}) - see {_settings.DocumentationDirectory}/perf_tips.txt.");
 
-                if (useless_at_start && !in_bitmap)
+                if ( _uselessTestCasesAtStart > 0 && _settings.FuzzBitmap == null)
                     _settings.Logger.Warning($"Some test cases look useless. Consider using a smaller set.");
 
                 if (_queue.Count > 100)
@@ -3688,22 +3701,12 @@ namespace DotNetFuzzing
 
             }
 
-            OKF("Here are some useful stats:\n\n"
+            _settings.Logger.Information("Here are some useful stats:\n\n" +
+               $"    Test case count : {_queue.Favored} favored, {_queue.VariableBehavior}, {_queue.Count} total\n" +
+               $"       Bitmap range : {min_bits} to {max_bits} bits (average: {((double)total_bitmap_size) / (total_bitmap_entries == 0 ? total_bitmap_entries : 1)} bits)\n" +
+               $"        Exec timing : {DescribeInteger(min_us)} to {DescribeInteger(max_us)} us (average: {DescribeInteger(avg_us)} us)\n");
 
-
-
-                cGRA "    Test case count : " cRST "%u favored, %u variable, %u total\n"
-
-
-                cGRA "       Bitmap range : " cRST "%u to %u bits (average: %0.02f bits)\n"
-
-
-                cGRA "        Exec timing : " cRST "%s to %s us (average: %s us)\n",
-                queued_favored, queued_variable, queued_paths, min_bits, max_bits,
-                ((double)total_bitmap_size) / (total_bitmap_entries ? total_bitmap_entries : 1),
-                DI(min_us), DI(max_us), DI(avg_us));
-
-            if (!timeout_given) {
+            if (_timeoutType == TimeOutTypes.NotSpecified) {
 
                 /* Figure out the appropriate timeout. The basic idea is: 5x average or
                    1x max, rounded up to EXEC_TM_ROUND ms and capped at 1 second.
@@ -3712,34 +3715,35 @@ namespace DotNetFuzzing
                    random scheduler jitter is less likely to have any impact, and because
                    our patience is wearing thin =) */
 
-                if (avg_us > 50000) exec_tmout = avg_us * 2 / 1000;
-                else if (avg_us > 10000) exec_tmout = avg_us * 3 / 1000;
-                else exec_tmout = avg_us * 5 / 1000;
+                if (avg_us > 50000) _executionTimeout = (int)(avg_us * 2 / 1000);
+                else if (avg_us > 10000) _executionTimeout = (int)(avg_us * 3 / 1000);
+                else _executionTimeout = (int)(avg_us * 5 / 1000);
 
-                exec_tmout = MAX(exec_tmout, max_us / 1000);
-                exec_tmout = (exec_tmout + EXEC_TM_ROUND) / EXEC_TM_ROUND * EXEC_TM_ROUND;
+                _executionTimeout = (int)Math.Max(_executionTimeout, max_us / 1000);
+                _executionTimeout = (_executionTimeout + Constants.EXEC_TM_ROUND) / Constants.EXEC_TM_ROUND * Constants.EXEC_TM_ROUND;
 
-                if (exec_tmout > EXEC_TIMEOUT) exec_tmout = EXEC_TIMEOUT;
+                if (_executionTimeout > Constants.EXEC_TIMEOUT) _executionTimeout = Constants.EXEC_TIMEOUT;
 
-                ACTF("No -t option specified, so I'll use exec timeout of %u ms.",
-                     exec_tmout);
+                _settings.Logger.Information($"No Timeout option specified, so I'll use exec timeout of {_executionTimeout} ms.",
+                     _executionTimeout);
 
-                timeout_given = 1;
+                _timeoutType = TimeOutTypes.Calculated;
 
-            } else if (timeout_given == 3) {
+            } else if (_timeoutType == TimeOutTypes.FromResumedSession) {
 
-                ACTF("Applying timeout settings from resumed session (%u ms).", exec_tmout);
+                _settings.Logger.Information("Applying timeout settings from resumed session (%u ms).", _executionTimeout);
 
             }
 
             /* In dumb mode, re-running every timing out test case with a generous time
                limit is very expensive, so let's select a more conservative default. */
 
-            if (dumb_mode && !getenv("AFL_HANG_TMOUT"))
-                hang_tmout = MIN(EXEC_TIMEOUT, exec_tmout * 2 + 100);
+            if (_settings.DumbMode && !_settings.HangTimeout.HasValue)
+            {
+                _hangTimeout = (int)(Math.Min(Constants.EXEC_TIMEOUT, _executionTimeout * 2 + 100) * TimeSpan.TicksPerMillisecond);
+            }
 
-            OKF("All set and ready to roll!");
-#endif
+            _settings.Logger.Information("All set and ready to roll!");
         }
    
         private void check_map_coverage()

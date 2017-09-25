@@ -59,7 +59,7 @@ namespace DotNetFuzzing.Common
         string DumbForkServer { get; }
         string Preload { get; }
 
-        TimeSpan HangTimeout { get; }
+        TimeSpan? HangTimeout { get; }
 
         string QemuBinaryFile { get; }
         string OutFile { get; }
