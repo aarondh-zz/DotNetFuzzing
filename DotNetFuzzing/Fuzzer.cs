@@ -183,7 +183,7 @@ namespace DotNetFuzzing
             SetupSharedMemoryAndVirginBits();
             InitCountClass16();
 
-            SetupDirsFds();
+            SetupOutputDirectories();
 
             _queue = new Queue(settings);
 
@@ -1141,6 +1141,7 @@ namespace DotNetFuzzing
         private static readonly byte[] _simplifyLookup = new byte[256];
         private string syncing_party;
         private int syncing_case;
+        private bool _inPlaceResume;
 
         static Fuzzer() {
             _simplifyLookup[0] = 1;
@@ -3651,76 +3652,201 @@ namespace DotNetFuzzing
 
         private void LoadExtras(string extrasDirectory)
         {
-            throw new NotImplementedException();
         }
-
+        private int ExtractInteger(string text)
+        {
+            int end = 0;
+            while (char.IsNumber(text[end++])) ;
+            return int.Parse(text.Substring(0, end));
+        }
         private void PivotInputs()
         {
-            throw new NotImplementedException();
+            string useFilePath = null;
+            QueueEntry q = _queue.First;
+            int id = 0;
+            _settings.Logger.Information("Creating hard links for all input files...");
+
+            while (q != null)
+            {
+
+                var fileName = Path.GetFileName(q.FileName);
+                int orig_id;
+
+                /* If the original file name conforms to the syntax and the recorded
+                   ID matches the one we'd assign, just use the original file name.
+                   This is valuable for resuming fuzzing runs. */
+                var casePrefix = _settings.SimpleFiles ? "id_" : "id:";
+
+                if (fileName.StartsWith(casePrefix))
+                {
+                    orig_id = ExtractInteger(fileName.Substring(3));
+                    if (orig_id == id)
+                    {
+                        useFilePath = $"{_settings.OutputDirectory}\\queue\\{fileName}";
+                        using (var stream = _settings.FileSystem.Open(useFilePath, OpenOptions.Create | OpenOptions.WriteOnly | OpenOptions.Exclusive))
+                        {
+                            stream.Write($"..\\{fileName}");
+                            stream.Flush();
+                            stream.Close();
+                        }
+                        /* Since we're at it, let's also try to find parent and figure out the
+                           appropriate depth for this entry. */
+                        int sep = fileName.IndexOf(":");
+                        if (sep >= 0)
+                        {
+                            var src_id = ExtractInteger(fileName.Substring(sep + 1));
+                            QueueEntry s = _queue.First;
+                            while (src_id-- > 0 && s != null)
+                            {
+                                s = s.Next;
+                            }
+                            if (s != null)
+                            {
+                                q.Depth = s.Depth + 1;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+
+                /* No dice - invent a new name, capturing the original one as a
+                   substring. */
+                if (_settings.SimpleFiles)
+                {
+                    useFilePath = $"{_settings.OutputDirectory}/queue/id_{id}";
+                }
+                else
+                {
+                    int sep = fileName.IndexOf(",orig:");
+                    if (sep >= 0)
+                    {
+                        sep += 6;
+                        useFilePath = fileName.Substring(sep);
+                    }
+                    else
+                    {
+                        useFilePath = fileName;
+                    }
+                }
+
+                /* Pivot to the new queue entry. */
+                _settings.FileSystem.Copy(q.FileName, useFilePath);
+                q.FileName = useFilePath;
+
+                /* Make sure that the passed_det value carries over, too. */
+
+                if (q.PassedDeterministic)
+                {
+                    q.MarkAsDeterministicDone(_settings);
+                }
+                q = q.Next;
+                id++;
+
+            }
+
+            if (_inPlaceResume)
+            {
+                NukeResumeDirectory();
+            }
+        }
+
+        private void NukeResumeDirectory()
+        {
         }
 
         private void LoadAuto()
         {
-            throw new NotImplementedException();
+            for (int i = 0; i < Constants.USE_AUTO_EXTRAS; i++)
+            {
+
+                byte[] tmp = new byte[Constants.MAX_AUTO_EXTRA + 1];
+                var filePath = $"{_settings.InputDirectory}/.state/auto_extras/auto_{i}";
+                int lengthRead;
+                using (var stream = _settings.FileSystem.Open(filePath, OpenOptions.ReadOnly))
+                {
+                    if ((lengthRead = stream.Read(tmp, 0, Constants.MAX_AUTO_EXTRA)) == 0)
+                    {
+                        _settings.Logger.Fatal("Unable to read from {filePath}", filePath);
+                        throw new Exception($"Unable to read from {filePath}");
+                    }
+                    if (lengthRead >= Constants.MIN_AUTO_EXTRA && lengthRead <= Constants.MAX_AUTO_EXTRA)
+                    {
+                        MaybeAddAuto(tmp, lengthRead);
+                    }
+                }
+            }
         }
 
+        private void MaybeAddAuto(byte[] tmp, int lengthRead)
+        {
+        }
+
+        private IEnumerable<string> ShuffleFileNames( IEnumerable<string> fileNames)
+        {
+            List<string>  unshuffled = fileNames.ToList();
+            List<string> shuffled = new List<string>();
+            while ( unshuffled.Count > 0 )
+            {
+                string fileName = unshuffled[Randomize(unshuffled.Count)];
+                unshuffled.Remove(fileName);
+                shuffled.Add(fileName);
+            }
+
+            return shuffled;
+        }
         private void ReadTestCases()
         {
-
-            var directoryName = $"{_settings.InputDirectory}/queue";
-            if (_settings.FileSystem.DirectoryExists(directoryName))
+            var inputDirectory = _settings.InputDirectory;
+            var inputQueue = $"{_settings.InputDirectory}/queue";
+            if (!_settings.FileSystem.DirectoryExists(inputQueue))
             {
-                _settings.Logger.Information("Scanning 'inputDirectory'...", _settings.InputDirectory);
-                var fileNames = _settings.FileSystem.EnumerateFiles(directoryName);
-                if (_settings.ShuffleQueue && fileNames.Count() > 1)
-                {
-                    _settings.Logger.Information("Shuffling queue...");
-                    fileNames = ShuffleFileNames(fileNames);
-                }
-                foreach (var fileName in fileNames)
-                {
-                    var path = $"{_settings.InputDirectory}/{fileName}";
-                    var deterministicFileName = $"{_settings.InputDirectory}/.state/deterministic_done/{fileName}";
-
-                    if (string.Equals(fileName, "readme.txt", StringComparison.CurrentCultureIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    var fileInfo = _settings.FileSystem.GetFileInfo(path);
-
-                    if (fileInfo.Length > _settings.MaxFileSize)
-                    {
-                        _settings.Logger.Fatal($"Test case '{fileName}' is too big ({fileInfo.Length}, limit is {_settings.MaxFileSize})");
-                    }
-                    /* Check for metadata that indicates that deterministic fuzzing
-                       is complete for this entry. We don't want to repeat deterministic
-                       fuzzing when resuming aborted scans, because it would be pointless
-                       and probably very time-consuming. */
-
-                    var passedDeterministic = _settings.FileSystem.FileExists(deterministicFileName);
-
-                    _queue.Add(path, (int)fileInfo.Length, passedDeterministic);
-
-                }
-
-                if (_queue.Count == 0)
-                {
-                    _settings.Logger.Warning("Looks like there are no valid test cases in the input directory!The fuzzer\n"
-                         + "needs one or more test case to start with - ideally, a small file under\n"
-                         + "1 kB or so. The cases must be stored as regular files directly in the\n"
-                         + "input directory.\n");
-                    throw new Exception($"Not usable test cased in '{directoryName}'");
-                }
+                inputDirectory = inputQueue;
             }
-            else
+
+            _settings.Logger.Information("Scanning {inputDirectory}...", inputDirectory);
+            var filePaths = _settings.FileSystem.EnumerateFiles(inputDirectory);
+            if (_settings.ShuffleQueue && filePaths.Count() > 1)
             {
-                _settings.Logger.Warning("The input directory does not seem to be valid - try again.The fuzzer needs\n"
-                   + "one or more test case to start with - ideally, a small file under 1 kB\n"
-                   + "or so. The cases must be stored as regular files directly in the input\n"
-                   + "directory.\n");
-                throw new Exception($"Unable to open '{directoryName}'");
+                _settings.Logger.Information("Shuffling queue...");
+                filePaths = ShuffleFileNames(filePaths);
             }
+            foreach (var filePath in filePaths)
+            {
+                var fileName = Path.GetFileName(filePath);
+                var deterministicFileName = $"{_settings.InputDirectory}/.state/deterministic_done/{fileName}";
+
+                if (string.Equals(fileName, "readme.txt", StringComparison.CurrentCultureIgnoreCase))
+                {
+                    continue;
+                }
+
+                var fileInfo = _settings.FileSystem.GetFileInfo(filePath);
+
+                if (fileInfo.Length > Constants.MAX_FILE)
+                {
+                    _settings.Logger.Fatal($"Test case '{fileName}' is too big ({fileInfo.Length}, limit is {_settings.MaxFileSize})");
+                }
+                /* Check for metadata that indicates that deterministic fuzzing
+                   is complete for this entry. We don't want to repeat deterministic
+                   fuzzing when resuming aborted scans, because it would be pointless
+                   and probably very time-consuming. */
+
+                var passedDeterministic = _settings.FileSystem.FileExists(deterministicFileName);
+
+                _queue.Add(filePath, (int)fileInfo.Length, passedDeterministic);
+
+            }
+
+            if (_queue.Count == 0)
+            {
+                _settings.Logger.Warning("Looks like there are no valid test cases in the input directory!The fuzzer\n"
+                     + "needs one or more test case to start with - ideally, a small file under\n"
+                     + "1 kB or so. The cases must be stored as regular files directly in the\n"
+                     + "input directory.\n");
+                throw new Exception($"No usable test cased in '{inputDirectory}'");
+            }
+
 
         }
         private class RunResult
@@ -3733,17 +3859,75 @@ namespace DotNetFuzzing
             _stats.total_executions++;
             throw new NotImplementedException();
         }
-        private IEnumerable<string> ShuffleFileNames(IEnumerable<string> fileNames)
+        private void MaybeDeleteOutputDirectory()
         {
-            throw new NotImplementedException();
-        }
 
-        private void SetupDirsFds()
+        }
+        private void EnsureOutputDirectory(string directory)
         {
-            if ( !_settings.FileSystem.DirectoryExists(_settings.OutputDirectory))
+            string path = $"{_settings.OutputDirectory}/{directory}";
+            if (!_settings.FileSystem.EnsureDirectory(path))
             {
+                _settings.Logger.Fatal($"Unable to create {path}");
+                throw new Exception($"Unable to create {path}");
+            }
+        }
+        private void SetupOutputDirectories()
+        {
+            _settings.Logger.Information("Setting up output directories...");
+            if (_settings.FileSystem.DirectoryExists(_settings.OutputDirectory))
+            {
+                MaybeDeleteOutputDirectory();
+            }
+            else
+            {
+                if (_settings.ResumeInplace)
+                {
+                    _settings.Logger.Fatal("Resume attempted but old output directory not found");
+                    throw new Exception("Resume attempted but old output directory not found");
+                }
                 _settings.FileSystem.CreateDirectory(_settings.OutputDirectory);
             }
+
+            /* Queue directory for any starting & discovered paths. */
+            EnsureOutputDirectory("queue/");
+
+
+            /* Top-level directory for queue metadata used for session
+               resume and related tasks. */
+            EnsureOutputDirectory("queue/.state/");
+
+            /* Directory for flagging queue entries that went through
+               deterministic fuzzing in the past. */
+            EnsureOutputDirectory("queue/.state/deterministic_done/");
+
+            /* Directory with the auto-selected dictionary entries. */
+
+            EnsureOutputDirectory("queue/.state/auto_extras/");
+
+            /* The set of paths currently deemed redundant. */
+
+            EnsureOutputDirectory("queue/.state/redundant_edges/");
+
+            /* The set of paths showing variable behavior. */
+
+            EnsureOutputDirectory("queue/.state/variable_behavior/");
+
+            /* Sync directory for keeping track of cooperating fuzzers. */
+
+            if (_settings.SyncId != null)
+            {
+                EnsureOutputDirectory("queue/.state/.synced/");
+            }
+
+            /* All recorded crashes. */
+
+            EnsureOutputDirectory("crashes/");
+
+            /* All recorded hangs. */
+
+            EnsureOutputDirectory("hangs/");
+
         }
 
         private void InitCountClass16()

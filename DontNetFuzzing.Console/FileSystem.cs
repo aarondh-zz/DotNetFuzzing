@@ -13,6 +13,15 @@ namespace DontNetFuzzing.Console
             return Directory.CreateDirectory(directory) != null;
         }
 
+        public bool EnsureDirectory(string directory)
+        {
+            if (!Directory.Exists(directory) )
+            {
+                return Directory.CreateDirectory(directory) != null;
+            }
+            return true;
+        }
+
         public bool Delete(string filePath)
         {
             try
@@ -39,6 +48,10 @@ namespace DontNetFuzzing.Console
         public bool FileExists(string filePath)
         {
             return File.Exists(filePath);
+        }
+        public void Copy( string fromPath, string toPath, bool overwrite = false)
+        {
+            File.Copy(fromPath, toPath, overwrite);
         }
         private class FileInfo : IFileInfo
         {

@@ -21,7 +21,9 @@ namespace DotNetFuzzing.Common
         bool Delete(string filePath);
         IEnumerable<string> EnumerateFiles(string directory);
         bool CreateDirectory(string directory);
+        bool EnsureDirectory(string directory);
         bool DirectoryExists(string directory);
         bool FileExists(string filePath);
+        void Copy(string fromPath, string toPath, bool overwrite = false);
     }
 }

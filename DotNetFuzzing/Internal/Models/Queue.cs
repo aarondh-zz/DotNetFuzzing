@@ -143,10 +143,29 @@ namespace DotNetFuzzing.Internal.Models
             /// Number of queue cycles behind
             /// </summary>
             public int Handicap { get; set; }
+            private int _depth;
             /// <summary>
             /// Path depth
             /// </summary>
-            public int Depth { get; set; }
+            public int Depth
+            {
+                get
+                {
+                    return _depth;
+                }
+                set
+                {
+                    _depth = value;
+                    if ( MaxDepth < value)
+                    {
+                        MaxDepth = value;
+                    }
+                }
+            }
+            /// <summary>
+            /// Path depth
+            /// </summary>
+            public int MaxDepth { get; private set; }
 
             /// <summary>
             /// Trace bytes, if kept

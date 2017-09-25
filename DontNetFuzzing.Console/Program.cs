@@ -14,8 +14,9 @@ namespace DontNetFuzzing.Console
                 Logger = new ConsoleLogger(),
                 FileSystem = new FileSystem(),
                 LogLevel = LogLevel.Verbose,
-                InputDirectory = "../../examples/example1",
-                OutputDirectory = "../../output/example1",
+                InputDirectory = "./examples/example1",
+                OutputDirectory = "./output/example1",
+                ShuffleQueue = true,
                 DumbMode = true,
                 Banner = "Example #1"
             };
