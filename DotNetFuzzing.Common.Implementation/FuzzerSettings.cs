@@ -12,6 +12,23 @@ namespace DotNetFuzzing.Common.Implementation
 
         public string OutputDirectory{ get; set; }
 
+        private string _documentationDirectory;
+        public string DocumentationDirectory
+        {
+            get
+            {
+                if (_documentationDirectory == null)
+                {
+                    return "docs";
+                }
+                return _documentationDirectory;
+            }
+            set
+            {
+                _documentationDirectory = value;
+            }
+        }
+
         public string ExtrasDirectory{ get; set; }
 
         public string MasterSyncId{ get; set; }
@@ -24,9 +41,13 @@ namespace DotNetFuzzing.Common.Implementation
 
         public string TargetFile{ get; set; }
 
-        public TimeSpan Timeout{ get; set; }
+        public TimeSpan? Timeout { get; set; }
 
-        public string MemoryLimit{ get; set; }
+        public bool SkipTimeouts { get; set; }
+
+        public bool SkipCrashes { get; set; }
+
+        public long MemoryLimit{ get; set; }
 
         public bool SkipDeterministic{ get; set; }
 

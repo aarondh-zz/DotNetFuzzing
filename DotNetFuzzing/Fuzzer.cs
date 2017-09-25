@@ -27,7 +27,7 @@ namespace DotNetFuzzing
         private uint master_id, master_max;     /* Master instance job splitting    */
 
         private long stage_cur_byte;            /* Byte offset of current stage op  */
-        private int stage_cur_val;            
+        private int stage_cur_val;
         private int _currentSkippedPaths;
         private ILogger _logger;
         private IFuzzerSettings _settings;
@@ -201,10 +201,7 @@ namespace DotNetFuzzing
                 LoadExtras(settings.ExtrasDirectory);
             }
 
-            if (settings.Timeout != TimeSpan.Zero)
-            {
-                FindTimeout();
-            }
+            FindTimeout();
 
             SetupOutput();
 
@@ -223,7 +220,7 @@ namespace DotNetFuzzing
 
             PerformDryRun(useArugments);
 
-            _queue.Cull(_settings.DumbMode, score_changed,top_rated,Constants.MAP_SIZE);
+            _queue.Cull(_settings.DumbMode, score_changed, top_rated, Constants.MAP_SIZE);
 
             ShowInitStats();
 
@@ -287,7 +284,7 @@ namespace DotNetFuzzing
                 }
 
 
-                skippedFuzz = FuzzOne(queueCurrent,currentEntry, queueCycle, currentEntry);
+                skippedFuzz = FuzzOne(queueCurrent, currentEntry, queueCycle, currentEntry);
 
                 if (StopSoon == StopMode.NotStopping && settings.SyncId != null && !skippedFuzz)
                 {
@@ -633,10 +630,10 @@ namespace DotNetFuzzing
             return (int)perf_score;
         }
         private byte[] _firstTrace = new byte[Constants.MAP_SIZE];
-        private readonly int havoc_div = 1;
+        private int havoc_div = 1;
         private bool auto_changed;
 
-        private bool IsAborting( FuzzOutcomes fault )
+        private bool IsAborting(FuzzOutcomes fault)
         {
             return StopSoon != StopMode.NotStopping
                 || (_settings.CrashMode && fault != FuzzOutcomes.FAULT_CRASH)
@@ -1094,7 +1091,7 @@ namespace DotNetFuzzing
             if (syncing_party != null)
             {
 
-                ret = $"sync:{syncing_party},src:{syncing_case}";
+                ret = $"sync={syncing_party},src={syncing_case}";
 
             }
             else
@@ -1104,23 +1101,23 @@ namespace DotNetFuzzing
                 if (splicing_with >= 0)
                     ret += $"+{splicing_with}";
 
-                ret += $",op:{stage_short}";
+                ret += $",op={stage_short}";
 
                 if (stage_cur_byte >= 0)
                 {
 
-                    ret += $",pos:{stage_cur_byte}";
+                    ret += $",pos={stage_cur_byte}";
 
                     if (stage_val_type != StageValueTypes.STAGE_VAL_NONE)
                     {
                         var stageValueName = (stage_val_type == StageValueTypes.STAGE_VAL_BE) ? "be:" : "";
-                        ret += $",val:{stageValueName}+d{stage_cur_val}";
+                        ret += $",val={stageValueName}+d{stage_cur_val}";
                     }
 
                 }
                 else
                 {
-                    ret += $",rep:{stage_cur_val}";
+                    ret += $",rep={stage_cur_val}";
                 }
 
             }
@@ -1142,51 +1139,61 @@ namespace DotNetFuzzing
         private string syncing_party;
         private int syncing_case;
         private bool _inPlaceResume;
+        private enum TimeOutTypes
+        {
+            NotSpecified,
+            Given,
+            Calculated,
+            SkipTimeouts,
+            FromResumedSession
+        }
+        private TimeOutTypes _timeoutType;
+        private int _uselessTestCasesAtStart;
 
         static Fuzzer() {
             _simplifyLookup[0] = 1;
-            for(int i = 1; i < _simplifyLookup.Length;i++)
+            for (int i = 1; i < _simplifyLookup.Length; i++)
             {
                 _simplifyLookup[i] = 128;
             }
-    }
-    static void SimplifyTrace(byte[] traceBits)
-    {
-
-        int i = traceBits.Length;
-
-        while (i-- >= 0)
+        }
+        static void SimplifyTrace(byte[] traceBits)
         {
-            /* Optimize for sparse bitmaps. */
-            byte entry = traceBits[i];
-            if (entry != 0)
+
+            int i = traceBits.Length;
+
+            while (i-- >= 0)
             {
-                traceBits[i] = _simplifyLookup[entry];
-            }
-            else {
-                traceBits[i]= 0x01;
+                /* Optimize for sparse bitmaps. */
+                byte entry = traceBits[i];
+                if (entry != 0)
+                {
+                    traceBits[i] = _simplifyLookup[entry];
+                }
+                else {
+                    traceBits[i] = 0x01;
+                }
             }
         }
-    }
 
-    /// <summary>
-    /// Check if the result of an execve() during routine fuzzing is interesting,
-    /// save or queue the input test case for further analysis if so.Returns 1 if
-    /// entry is saved, 0 otherwise.
-    /// </summary>
-    /// <param name="argv"></param>
-    /// <param name="mem"></param>
-    /// <param name="len"></param>
-    /// <param name="fault"></param>
-    /// <returns></returns>
-    private bool SaveIfInteresting(byte[] mem, int len, RunResult runResult, int currentEntry)
+        /// <summary>
+        /// Check if the result of an execve() during routine fuzzing is interesting,
+        /// save or queue the input test case for further analysis if so.Returns 1 if
+        /// entry is saved, 0 otherwise.
+        /// </summary>
+        /// <param name="argv"></param>
+        /// <param name="mem"></param>
+        /// <param name="len"></param>
+        /// <param name="fault"></param>
+        /// <returns></returns>
+        private bool SaveIfInteresting(byte[] mem, int len, RunResult runResult, int currentEntry)
         {
 
             string filePath;
             bool keeping = false;
             NewBitTypes hnb;
 
-            if ((!_settings.CrashMode && runResult.Outcome == FuzzOutcomes.Success) 
+            if ((!_settings.CrashMode && runResult.Outcome == FuzzOutcomes.Success)
                 || (_settings.CrashMode && runResult.Outcome == FuzzOutcomes.FAULT_CRASH))
             {
 
@@ -1197,13 +1204,13 @@ namespace DotNetFuzzing
                     if (_settings.CrashMode) _stats.total_crashes++;
                     return false;
                 }
-                if ( _settings.SimpleFiles )
+                if (_settings.SimpleFiles)
                 {
-                    filePath = $"{_settings.OutputDirectory}/queue/id:{_queue.Count}";
+                    filePath = $"{_settings.OutputDirectory}/queue/id_{_queue.Count}";
                 }
                 else
                 {
-                    filePath = $"{_settings.OutputDirectory}/queue/id:{_queue.Count},{DescribeOperation(hnb, currentEntry)}";
+                    filePath = $"{_settings.OutputDirectory}/queue/id={_queue.Count},{DescribeOperation(hnb, currentEntry)}";
                 }
                 var newQueuedEntry = _queue.Add(filePath, len, false);
 
@@ -1280,7 +1287,7 @@ namespace DotNetFuzzing
 
                     }
 
-                    if ( _settings.SimpleFiles)
+                    if (_settings.SimpleFiles)
                     {
                         filePath = $"{_settings.OutputDirectory}/hangs/id:{_stats.unique_hangs},{DescribeOperation(NewBitTypes.NoNewBits, currentEntry)}";
                     }
@@ -1312,13 +1319,13 @@ namespace DotNetFuzzing
                     {
                         SimplifyTrace(trace_bits);
 
-                        if (HasNewBits(virgin_crash, trace_bits)==0) return keeping;
+                        if (HasNewBits(virgin_crash, trace_bits) == 0) return keeping;
 
                     }
 
-                    if (_stats.unique_crashes ==0) WriteCrashReadme();
+                    if (_stats.unique_crashes == 0) WriteCrashReadme();
 
-                    if(_settings.SimpleFiles) {
+                    if (_settings.SimpleFiles) {
                         filePath = $"{_settings.OutputDirectory}/crashes/id:{_stats.unique_crashes},{runResult.Reason},{DescribeOperation(NewBitTypes.NoNewBits, currentEntry)}";
                     }
                     else
@@ -1373,7 +1380,7 @@ namespace DotNetFuzzing
         {
 
             byte[] resultingBytes;
-            if( _postHandler == null )
+            if (_postHandler == null)
             {
                 resultingBytes = out_buf.GetBytes();
             }
@@ -1416,7 +1423,7 @@ namespace DotNetFuzzing
             }
 
             /* This handles FAULT_ERROR for us: */
-            
+
             _queued_discovered += SaveIfInteresting(resultingBytes, length, runResult, currentEntry) ? 1 : 0;
 
             if ((stage_cur % _settings.StatsUpdateFrequency) == 0 || stage_cur + 1 == stage_max)
@@ -1469,7 +1476,7 @@ namespace DotNetFuzzing
             /* Reject builtin interesting values. */
             unsafe
             {
-                fixed( byte* bytePointer = &mem[0])
+                fixed (byte* bytePointer = &mem[0])
                 {
                     if (len == 2)
                     {
@@ -1643,7 +1650,7 @@ namespace DotNetFuzzing
             /* 8-, 16-, and 32-bit patterns are OK only if shift factor is
                divisible by 8, since that's the stepover for these ops. */
 
-            if ((sh & 7)!=0) return false;
+            if ((sh & 7) != 0) return false;
 
             if (xor_val == 0xff || xor_val == 0xffff || xor_val == 0xffffffff)
                 return true;
@@ -1671,7 +1678,7 @@ namespace DotNetFuzzing
             for (int i = 0; i < blen; i++)
             {
 
-                byte a = (byte)( old_val >> (8 * i)),
+                byte a = (byte)(old_val >> (8 * i)),
                    b = (byte)(new_val >> (8 * i));
 
                 if (a != b) { diffs++; ov = a; nv = b; }
@@ -1999,7 +2006,7 @@ namespace DotNetFuzzing
             /* Skip deterministic fuzzing if exec path checksum puts this out of scope
                for this master instance. */
 
-            if (master_max > 0  && (currentQueue.ExecutionTraceChecksum % master_max) != master_id - 1)
+            if (master_max > 0 && (currentQueue.ExecutionTraceChecksum % master_max) != master_id - 1)
                 goto havoc_stage;
 
             doingDeterministic = true;
@@ -2185,7 +2192,7 @@ namespace DotNetFuzzing
 
                 stage_cur_byte = stage_cur;
                 out_buf.Seek(stage_cur, SeekOrigin.Begin);
-                out_buf.Xor( 0xFF );
+                out_buf.Xor(0xFF);
 
                 if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
 
@@ -2423,7 +2430,7 @@ namespace DotNetFuzzing
 
                         stage_cur_val = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
-                        out_buf.Write((UInt16)(orig + j),1);
+                        out_buf.Write((UInt16)(orig + j), 1);
 
                         if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
                         stage_cur++;
@@ -2436,7 +2443,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt16)(orig - j), 1);
 
-                        if (CommonFuzzStuff( out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2463,7 +2470,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP16((UInt16)(SWAP16(orig) - j)), 1);
 
-                        if (CommonFuzzStuff( out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2507,7 +2514,7 @@ namespace DotNetFuzzing
 
                 for (var j = 1; j <= Constants.ARITH_MAX; j++) {
 
-                    UInt32 r1 = (UInt32)( orig ^ (orig + j)),
+                    UInt32 r1 = (UInt32)(orig ^ (orig + j)),
                         r2 = (UInt32)(orig ^ (orig - j)),
                         r3 = (UInt32)(orig ^ SWAP32((UInt32)(SWAP32(orig) + j))),
                         r4 = (UInt32)(orig ^ SWAP32((UInt32)(SWAP32(orig) - j)));
@@ -2638,7 +2645,7 @@ namespace DotNetFuzzing
             stage_cycles[(int)FuzzingStages.STAGE_INTEREST8] += stage_max;
 
             /* Setting 16-bit integers, both endians. */
-            
+
             if (_settings.NoArithmatic || length < 2) goto skip_interest;
 
             stage_name = "interest 16/8";
@@ -2788,7 +2795,7 @@ namespace DotNetFuzzing
              * DICTIONARY STUFF *
              ********************/
 
-            if (this._extras.Count==0) goto skip_user_extras;
+            if (this._extras.Count == 0) goto skip_user_extras;
 
             /* Overwrite with user-supplied extras. */
 
@@ -2833,7 +2840,7 @@ namespace DotNetFuzzing
                     out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.Write(in_buf, 0, _extras[j].Length);
 
-                    if (CommonFuzzStuff( out_buf, length, currentEntry)) goto abandon_entry;
+                    if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
 
                     stage_cur++;
 
@@ -2905,14 +2912,14 @@ namespace DotNetFuzzing
 
             skip_user_extras:
 
-            if (_autoExtras.Count==0) goto skip_extras;
+            if (_autoExtras.Count == 0) goto skip_extras;
 
             stage_name = "auto extras (over)";
             stage_short = "ext_AO";
             stage_cur = 0;
             stage_max = Math.Min(_autoExtras.Count, Constants.USE_AUTO_EXTRAS) * length;
 
-            stage_val_type =  StageValueTypes.STAGE_VAL_NONE;
+            stage_val_type = StageValueTypes.STAGE_VAL_NONE;
 
             orig_hit_cnt = new_hit_cnt;
 
@@ -3023,7 +3030,7 @@ namespace DotNetFuzzing
 
                             /* Set byte to interesting value. */
                             out_buf.Seek(Randomize(temp_len), SeekOrigin.Begin);
-                            out_buf.Write(Constants.INTERESTING_8,Randomize(Constants.INTERESTING_8.Length),1);
+                            out_buf.Write(Constants.INTERESTING_8, Randomize(Constants.INTERESTING_8.Length), 1);
                             break;
 
                         case 2:
@@ -3032,7 +3039,7 @@ namespace DotNetFuzzing
 
                             if (temp_len < 2) break;
 
-                            if (Randomize(2)>0) {
+                            if (Randomize(2) > 0) {
                                 out_buf.Seek(Randomize(temp_len - 1), SeekOrigin.Begin);
                                 out_buf.Write((UInt16)(Constants.INTERESTING_16[Randomize(Constants.INTERESTING_16.Length)]), 1);
 
@@ -3050,7 +3057,7 @@ namespace DotNetFuzzing
 
                             if (temp_len < 4) break;
 
-                            if (Randomize(2)>0) {
+                            if (Randomize(2) > 0) {
 
 
                                 out_buf.Seek(Randomize(temp_len - 3), SeekOrigin.Begin);
@@ -3110,7 +3117,7 @@ namespace DotNetFuzzing
 
                             if (temp_len < 2) break;
 
-                            if (Randomize(2)>0) {
+                            if (Randomize(2) > 0) {
 
                                 out_buf.Seek(Randomize(temp_len - 1), SeekOrigin.Begin);
                                 out_buf.Add((UInt16)(1 + Randomize(Constants.ARITH_MAX)));
@@ -3133,7 +3140,7 @@ namespace DotNetFuzzing
                             if (temp_len < 4) break;
 
                             out_buf.Seek(Randomize(temp_len - 3), SeekOrigin.Begin);
-                            if (Randomize(2)>0) {
+                            if (Randomize(2) > 0) {
 
                                 out_buf.Substract((UInt32)(1 + Randomize(Constants.ARITH_MAX)));
 
@@ -3154,14 +3161,14 @@ namespace DotNetFuzzing
                             if (temp_len < 4) break;
 
                             out_buf.Seek(Randomize(temp_len - 3), SeekOrigin.Begin);
-                            if (Randomize(2)>0) {
+                            if (Randomize(2) > 0) {
 
                                 out_buf.Add((UInt32)(1 + Randomize(Constants.ARITH_MAX)));
 
                             } else {
 
                                 int num = 1 + Randomize(Constants.ARITH_MAX);
-                                out_buf.Func((UInt32 w)=>SWAP32(SWAP32((UInt32)(w + num))));
+                                out_buf.Func((UInt32 w) => SWAP32(SWAP32((UInt32)(w + num))));
                             }
 
                             break;
@@ -3172,7 +3179,7 @@ namespace DotNetFuzzing
                                why not. We use XOR with 1-255 to eliminate the
                                possibility of a no-op. */
                             out_buf.Seek(Randomize(temp_len), SeekOrigin.Begin);
-                            out_buf.Xor((byte)( 1 + Randomize(255)));
+                            out_buf.Xor((byte)(1 + Randomize(255)));
                             break;
                         case 11:
                         case 12: {
@@ -3233,7 +3240,7 @@ namespace DotNetFuzzing
                                 {
                                     new_buf.WriteBytes(out_buf, clone_from, clone_len);
                                 }
-                                else if ( Randomize(2) == 0)
+                                else if (Randomize(2) == 0)
                                 {
                                     out_buf.Seek(Randomize(temp_len), SeekOrigin.Begin);
                                     byte[] randomFromOutBuf = new byte[1];
@@ -3242,7 +3249,7 @@ namespace DotNetFuzzing
                                 }
                                 else
                                 {
-                                    new_buf.Write( (byte)Randomize(256), clone_len);
+                                    new_buf.Write((byte)Randomize(256), clone_len);
                                 }
                                 /* Tail */
                                 new_buf.WriteBytes(out_buf, clone_to, temp_len - clone_to);
@@ -3280,7 +3287,7 @@ namespace DotNetFuzzing
                                     }
 
                                 }
-                                else if ( Randomize(2) != 0)
+                                else if (Randomize(2) != 0)
                                 {
                                     byte[] randomOutBufValue = new byte[1];
                                     out_buf.Read(randomOutBufValue, 0, 1);
@@ -3400,7 +3407,7 @@ namespace DotNetFuzzing
                 if (temp_len < length) out_buf.SetLength(length);
                 temp_len = length;
                 out_buf.Seek(0, SeekOrigin.Begin);
-                out_buf.Write( in_buf, 0, length);
+                out_buf.Write(in_buf, 0, length);
 
                 /* If we're finding new stuff, let's run for a bit longer, limits
                    permitting. */
@@ -3504,7 +3511,7 @@ namespace DotNetFuzzing
                     in_buf = new_buf.GetBytes();
 
                     out_buf.Dispose();
-                    out_buf =  new ByteStream(length);
+                    out_buf = new ByteStream(length);
                     out_buf.Write(in_buf, 0, length);
 
                     goto havoc_stage;
@@ -3620,34 +3627,375 @@ namespace DotNetFuzzing
             return 0;
 
         }
-
+        /// <summary>
+        /// Display quick statistics at the end of processing the input directory,
+        /// plus a bunch of warnings.Some calibration stuff also ended up here,
+        /// along with several hardcoded constants.Maybe clean up eventually.
+        /// </summary>
         private void ShowInitStats()
         {
-        }
+            QueueEntry q = _queue.First;
+            int min_bits = 0, max_bits = 0;
+            long min_us = 0, max_us = 0;
+            long avg_us = 0;
+            int max_len = 0;
 
+            if (total_cal_cycles != 0) avg_us = total_cal_us / total_cal_cycles;
+
+            while (q != null) {
+
+                if (min_us == 0 || q.ExecutionTimeUs < min_us) min_us = q.ExecutionTimeUs;
+                if (q.ExecutionTimeUs > max_us) max_us = q.ExecutionTimeUs;
+
+                if (min_bits == 0 || q.BitmapSize < min_bits) min_bits = q.BitmapSize;
+                if (q.BitmapSize > max_bits) max_bits = q.BitmapSize;
+
+                if (q.Length > max_len) max_len = q.Length;
+
+                q = q.Next;
+
+            }
+#if never
+            if (avg_us > (_settings.QueueMode ? 50000 : 10000))
+            {
+                _settings.Logger.Warning($"The target binary is pretty slow! See {_settings.DocumentationDirectory}/perf_tips.txt.");
+            }
+
+            /* Let's keep things moving with slow binaries. */
+
+            if (avg_us > 50000) havoc_div = 10;     /* 0-19 execs/sec   */
+            else if (avg_us > 20000) havoc_div = 5; /* 20-49 execs/sec  */
+            else if (avg_us > 10000) havoc_div = 2; /* 50-100 execs/sec */
+
+            if (!_settings.ResumeFuzzing) {
+
+                if (max_len > 50 * 1024)
+                    _settings.Logger.Warning($"Some test cases are huge (%s) - see %s/perf_tips.txt!",
+        DMS(max_len), doc_path);
+                else if (max_len > 10 * 1024)
+                    _settings.Logger.Warning($"Some test cases are big (%s) - see %s/perf_tips.txt.",
+        DMS(max_len), doc_path);
+
+                if (useless_at_start && !in_bitmap)
+                    _settings.Logger.Warning($"Some test cases look useless. Consider using a smaller set.");
+
+                if (_queue.Count > 100)
+                {
+                    _settings.Logger.Warning($"You probably have far too many input files! Consider trimming down.");
+                }
+                else if (_queue.Count > 20)
+                    _settings.Logger.Warning($"You have lots of input files; try starting small.");
+
+            }
+
+            OKF("Here are some useful stats:\n\n"
+
+
+
+                cGRA "    Test case count : " cRST "%u favored, %u variable, %u total\n"
+
+
+                cGRA "       Bitmap range : " cRST "%u to %u bits (average: %0.02f bits)\n"
+
+
+                cGRA "        Exec timing : " cRST "%s to %s us (average: %s us)\n",
+                queued_favored, queued_variable, queued_paths, min_bits, max_bits,
+                ((double)total_bitmap_size) / (total_bitmap_entries ? total_bitmap_entries : 1),
+                DI(min_us), DI(max_us), DI(avg_us));
+
+            if (!timeout_given) {
+
+                /* Figure out the appropriate timeout. The basic idea is: 5x average or
+                   1x max, rounded up to EXEC_TM_ROUND ms and capped at 1 second.
+
+                   If the program is slow, the multiplier is lowered to 2x or 3x, because
+                   random scheduler jitter is less likely to have any impact, and because
+                   our patience is wearing thin =) */
+
+                if (avg_us > 50000) exec_tmout = avg_us * 2 / 1000;
+                else if (avg_us > 10000) exec_tmout = avg_us * 3 / 1000;
+                else exec_tmout = avg_us * 5 / 1000;
+
+                exec_tmout = MAX(exec_tmout, max_us / 1000);
+                exec_tmout = (exec_tmout + EXEC_TM_ROUND) / EXEC_TM_ROUND * EXEC_TM_ROUND;
+
+                if (exec_tmout > EXEC_TIMEOUT) exec_tmout = EXEC_TIMEOUT;
+
+                ACTF("No -t option specified, so I'll use exec timeout of %u ms.",
+                     exec_tmout);
+
+                timeout_given = 1;
+
+            } else if (timeout_given == 3) {
+
+                ACTF("Applying timeout settings from resumed session (%u ms).", exec_tmout);
+
+            }
+
+            /* In dumb mode, re-running every timing out test case with a generous time
+               limit is very expensive, so let's select a more conservative default. */
+
+            if (dumb_mode && !getenv("AFL_HANG_TMOUT"))
+                hang_tmout = MIN(EXEC_TIMEOUT, exec_tmout * 2 + 100);
+
+            OKF("All set and ready to roll!");
+#endif
+        }
+   
+        private void check_map_coverage()
+        {
+            if (CountBytes(trace_bits) < 100) return;
+
+            for (int i = (1 << (Constants.MAP_SIZE_POW2 - 1)); i < Constants.MAP_SIZE; i++)
+            {
+                if (trace_bits[i] != 0) return;
+            }
+
+            _settings.Logger.Warning("Recompile binary with newer version of afl to improve coverage!");
+        }
+        /// <summary>
+        /// Perform dry run of all test cases to confirm that the app is working as
+        /// expected.This is done only for the initial inputs, and only once.
+        /// </summary>
+        /// <param name="useArugments"></param>
         private void PerformDryRun(object useArugments)
         {
-            throw new NotImplementedException();
+            QueueEntry q = _queue.First;
+            int cal_failures = 0;
+            //u8* skip_crashes = getenv("AFL_SKIP_CRASHES");
+
+            while (q != null) {
+
+                byte[] use_mem;
+                RunResult res;
+
+                var fileName = Path.GetFileName(q.FileName);
+
+                _settings.Logger.Information($"Attempting dry run with '{fileName}'...");
+
+                using (var stream = _settings.FileSystem.Open(q.FileName, OpenOptions.ReadOnly))
+                {
+                    use_mem = new Byte[q.Length];
+                    if (use_mem.Length != stream.Read(use_mem, 0, use_mem.Length))
+                    {
+                        _settings.Logger.Information($"Unable to read '{fileName}'...");
+                    }
+                    stream.Close();
+                }
+                res = CalibrateCase(q, use_mem, 0, true);
+
+                if (StopSoon != StopMode.NotStopping) {
+                    return;
+                }
+
+                if ((_settings.CrashMode && res.Outcome == FuzzOutcomes.FAULT_CRASH) || (!_settings.CrashMode && res.Outcome == FuzzOutcomes.Success) || res.Outcome == FuzzOutcomes.FAULT_NOBITS)
+                {
+                    _settings.Logger.Information($"len = {q.Length}, map size = {q.BitmapSize}, exec speed = {q.ExecutionTimeUs} us'");
+                }
+
+                switch (res.Outcome) {
+
+                    case FuzzOutcomes.Success:
+
+                        if (q == _queue.First)
+                        {
+                            check_map_coverage();
+                        }
+
+                        if (_settings.CrashMode)
+                        {
+                            _settings.Logger.Fatal($"Test case '{fileName}' does *NOT* crash");
+                            throw new Exception($"Test case '{fileName}' does *NOT* crash");
+                        }
+
+                        break;
+
+                    case FuzzOutcomes.FAULT_TMOUT:
+
+                        if (_timeoutType != TimeOutTypes.NotSpecified) {
+
+                            /* The -t nn+ syntax in the command line sets timeout_given to '2' and
+                               instructs afl-fuzz to tolerate but skip queue entries that time
+                               out. */
+
+                            if (_timeoutType == TimeOutTypes.SkipTimeouts) {
+                                _settings.Logger.Warning("Test case results in a timeout (skipping)");
+                                q.CalibrationFailed = Constants.CAL_CHANCES;
+                                cal_failures++;
+                                break;
+                            }
+
+                            _settings.Logger.Information("\n[-] " +
+               $"The program took more than {_executionTimeout} ms to process one of the initial test cases.\n" +
+               "    Usually, the right thing to do is to relax the -t option - or to delete it\n" +
+               "    altogether and allow the fuzzer to auto-calibrate. That said, if you know\n" +
+               "    what you are doing and want to simply skip the unruly test cases, append\n" +
+               $"    '+' at the end of the value passed to -t ('-t {_executionTimeout}+').\n");
+
+                            _settings.Logger.Fatal($"Test case '{fileName}' results in a timeout");
+
+                        } else {
+
+                            _settings.Logger.Information("\n [-] " +
+                                 $"The program took more than {_executionTimeout} ms to process one of the initial test cases.\n" +
+                                 "    This is bad news; raising the limit with the -t option is possible, but\n" +
+                                 "    will probably make the fuzzing process extremely slow.\n\n" +
+                                 "    If this test case is just a fluke, the other option is to just avoid it\n" +
+                                 "    altogether, and find one that is less of a CPU hog.\n");
+
+                            _settings.Logger.Fatal($"Test case '{fileName}' results in a timeout");
+
+                        }
+                        break;
+                    case FuzzOutcomes.FAULT_CRASH:
+
+                        if (_settings.CrashMode) break;
+
+                        if (_settings.SkipCrashes) {
+                            _settings.Logger.Warning("Test case results in a crash (skipping)");
+                            q.CalibrationFailed = Constants.CAL_CHANCES;
+                            cal_failures++;
+                            break;
+                        }
+
+                        if (_settings.MemoryLimit > 0) {
+
+                            _settings.Logger.Information("\n[-] " +
+                                 "Oops, the program crashed with one of the test cases provided. There are\n" +
+                                 "    several possible explanations:\n\n" +
+                                 "    - The test case causes known crashes under normal working conditions. If\n" +
+                                 "      so, please remove it. The fuzzer should be seeded with interesting\n" +
+                                 "      inputs - but not ones that cause an outright crash.\n\n" +
+                                 $"    - The current memory limit ({_settings.MemoryLimit}) is too low for this program, causing\n" +
+                                 "      it to die due to OOM when parsing valid files. To fix this, try\n" +
+                                 "      bumping it up with the -m setting in the command line. \n" +
+                                 "      Tip: you can use http://jwilk.net/software/recidivm to quickly\n" +
+                                 "      estimate the required amount of virtual memory for the binary. Also,\n" +
+                                 $"      if you are using ASAN, see {_settings.DocumentationDirectory}/notes_for_asan.txt.\n\n" +
+
+                                 "    - Least likely, there is a horrible bug in the fuzzer. If other options\n" +
+                                 "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
+                        }
+                        else
+                        {
+
+                            _settings.Logger.Information("\n[-] " +
+                                 "Oops, the program crashed with one of the test cases provided. There are\n" +
+                                 "    several possible explanations:\n\n" +
+                                 "    - The test case causes known crashes under normal working conditions. If\n" +
+                                 "      so, please remove it. The fuzzer should be seeded with interesting\n" +
+                                 "      inputs - but not ones that cause an outright crash.\n\n" +
+                                 "    - Least likely, there is a horrible bug in the fuzzer. If other options\n" +
+                                 "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
+
+                        }
+
+                        _settings.Logger.Fatal($"Test case '{fileName}' results in a crash");
+                        break;
+                    case FuzzOutcomes.FAULT_ERROR:
+
+                        _settings.Logger.Fatal($"Unable to execute target application ('%s')");
+                        break;
+
+                    case FuzzOutcomes.FAULT_NOINST:
+
+                        _settings.Logger.Fatal("No instrumentation detected");
+                        break;
+
+                    case FuzzOutcomes.FAULT_NOBITS:
+
+                        _uselessTestCasesAtStart++;
+
+                        if (_settings.FuzzBitmap == null && !_settings.ShuffleQueue)
+                        {
+                            _settings.Logger.Warning("No new instrumentation output, test case may be useless.");
+                        }
+
+                        break;
+
+                }
+
+                if (q.VariableBehavior) {
+                    _settings.Logger.Warning("Instrumentation output varies across runs.");
+                }
+
+                q = q.Next;
+
+            }
+
+            if (cal_failures > 0) {
+
+                var orCrash = _settings.SkipCrashes ? " or crash" : "";
+                var orCrashes = _settings.SkipCrashes ? " or crashes" : "";
+                if (cal_failures == _queue.Count)
+                {
+                    _settings.Logger.Fatal($"All test cases time out{orCrash}, giving up!");
+                    throw new Exception($"All test cases time out{orCrash}, giving up!");
+                }
+
+                _settings.Logger.Warning($"Skipped {cal_failures} test cases ({((double)cal_failures) * 100 / _queue.Count}%) due to timeouts{orCrashes}.");
+
+                if (cal_failures * 5 > _queue.Count)
+                {
+                    _settings.Logger.Warning("High percentage of rejected test cases, check settings!");
+                }
+
+            }
+
+            _settings.Logger.Information("All test cases processed.");
         }
 
-        private object GetArguments(IFuzzerSettings settings)
+        private IFuzzerSettings GetArguments(IFuzzerSettings settings)
         {
-            throw new NotImplementedException();
+            return settings;
         }
 
-        private object GetQueueArguments(IFuzzerSettings settings)
+        private IFuzzerSettings GetQueueArguments(IFuzzerSettings settings)
         {
-            throw new NotImplementedException();
+            return settings;
         }
 
         private void CheckBinary(string qemuBinaryFile)
         {
-            throw new NotImplementedException();
         }
-
+        /// <summary>
+        /// The same, but for timeouts. The idea is that when resuming sessions without
+        /// -t given, we don't want to keep auto-scaling the timeout over and over
+        /// again to prevent it from growing due to random flukes.
+        /// </summary>
         private void FindTimeout()
         {
-            throw new NotImplementedException();
+            string statsFilePath;
+            if (!_settings.ResumeFuzzing) {
+                return;
+            }
+            if (_settings.ResumeInplace) {
+                statsFilePath = $"{_settings.InputDirectory}/fuzzer_stats";
+            }
+            else {
+                statsFilePath = $"{_settings.InputDirectory}/../fuzzer_stats";
+            }
+            if ( _settings.FileSystem.FileExists(statsFilePath))
+            {
+                FuzzerStatistics fuzzerStatistics;
+                using (var stream = _settings.FileSystem.Open(statsFilePath, OpenOptions.ReadOnly))
+                {
+                    fuzzerStatistics = JsonConvert.DeserializeObject<FuzzerStatistics>(stream.ReadToEnd(Encoding.UTF8));
+                    stream.Close();
+                    if ( !fuzzerStatistics.exec_timeout.HasValue )
+                    {
+                        return;
+                    }
+                    var exec_timeout = fuzzerStatistics.exec_timeout.Value;
+                    if ( exec_timeout.TotalMilliseconds <= 4)
+                    {
+                        return;
+                    }
+                    _executionTimeout = (int)exec_timeout.TotalMilliseconds;
+                    _timeoutType = TimeOutTypes.FromResumedSession;
+                }
+            }
+
         }
 
         private void LoadExtras(string extrasDirectory)
@@ -3718,20 +4066,25 @@ namespace DotNetFuzzing
                 }
                 else
                 {
-                    int sep = fileName.IndexOf(",orig:");
+                    string useFileName;
+                    int sep = fileName.IndexOf(",orig=");
                     if (sep >= 0)
                     {
                         sep += 6;
-                        useFilePath = fileName.Substring(sep);
+                        useFileName = fileName.Substring(sep);
                     }
                     else
                     {
-                        useFilePath = fileName;
+                        useFileName = fileName;
                     }
+                    useFilePath = $"{_settings.OutputDirectory}/queue/id={id},orig={useFileName}";
                 }
 
                 /* Pivot to the new queue entry. */
-                _settings.FileSystem.Copy(q.FileName, useFilePath);
+                if ( !_settings.FileSystem.LinkFile(useFilePath, q.FileName) )
+                {
+                    _settings.FileSystem.Copy(q.FileName, useFilePath);
+                }
                 q.FileName = useFilePath;
 
                 /* Make sure that the passed_det value carries over, too. */
@@ -3762,17 +4115,20 @@ namespace DotNetFuzzing
 
                 byte[] tmp = new byte[Constants.MAX_AUTO_EXTRA + 1];
                 var filePath = $"{_settings.InputDirectory}/.state/auto_extras/auto_{i}";
-                int lengthRead;
-                using (var stream = _settings.FileSystem.Open(filePath, OpenOptions.ReadOnly))
+                if (_settings.FileSystem.FileExists(filePath))
                 {
-                    if ((lengthRead = stream.Read(tmp, 0, Constants.MAX_AUTO_EXTRA)) == 0)
+                    int lengthRead;
+                    using (var stream = _settings.FileSystem.Open(filePath, OpenOptions.ReadOnly))
                     {
-                        _settings.Logger.Fatal("Unable to read from {filePath}", filePath);
-                        throw new Exception($"Unable to read from {filePath}");
-                    }
-                    if (lengthRead >= Constants.MIN_AUTO_EXTRA && lengthRead <= Constants.MAX_AUTO_EXTRA)
-                    {
-                        MaybeAddAuto(tmp, lengthRead);
+                        if ((lengthRead = stream.Read(tmp, 0, Constants.MAX_AUTO_EXTRA)) == 0)
+                        {
+                            _settings.Logger.Fatal("Unable to read from {filePath}", filePath);
+                            throw new Exception($"Unable to read from {filePath}");
+                        }
+                        if (lengthRead >= Constants.MIN_AUTO_EXTRA && lengthRead <= Constants.MAX_AUTO_EXTRA)
+                        {
+                            MaybeAddAuto(tmp, lengthRead);
+                        }
                     }
                 }
             }
@@ -3797,11 +4153,15 @@ namespace DotNetFuzzing
         }
         private void ReadTestCases()
         {
-            var inputDirectory = _settings.InputDirectory;
+            string inputDirectory;
             var inputQueue = $"{_settings.InputDirectory}/queue";
-            if (!_settings.FileSystem.DirectoryExists(inputQueue))
+            if (_settings.FileSystem.DirectoryExists(inputQueue))
             {
                 inputDirectory = inputQueue;
+            }
+            else
+            {
+                inputDirectory = _settings.InputDirectory;
             }
 
             _settings.Logger.Information("Scanning {inputDirectory}...", inputDirectory);

@@ -12,8 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="examples\example1\queue\" />
-    <Folder Include="output\example1\" />
+    <Folder Include="output\" />
   </ItemGroup>
 
 </Project>

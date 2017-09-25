@@ -25,5 +25,7 @@ namespace DotNetFuzzing.Common
         bool DirectoryExists(string directory);
         bool FileExists(string filePath);
         void Copy(string fromPath, string toPath, bool overwrite = false);
+        bool LinkFile(string symbolicLinkFilePath, string targetFilePath);
+        bool LinkDirectory(string symbolicLinkDirectoryPath, string targetDirectoryPath);
     }
 }

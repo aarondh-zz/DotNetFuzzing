@@ -28,7 +28,7 @@ namespace DotNetFuzzing
         public int last_crash { get; set; }
         public int last_hang { get; set; }
         public int execs_since_crash { get; set; }
-        public TimeSpan exec_timeout { get; set; }
+        public TimeSpan? exec_timeout { get; set; }
         public string afl_banner { get; set; }
         public string afl_version { get; set; }
         public string command_line { get; set; }

@@ -2,15 +2,28 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace DontNetFuzzing.Console
 {
     public class FileSystem : IFileSystem
     {
+        [DllImport("kernel32.dll")]
+        private static extern bool CreateSymbolicLink(string symbolicLinkPath, string targetPath, int dwFlags);
+  
         public bool CreateDirectory(string directory)
         {
             return Directory.CreateDirectory(directory) != null;
+        }
+        public bool LinkFile(string symbolicLinkFilePath, string targetFilePath)
+        {
+            return CreateSymbolicLink(symbolicLinkFilePath, targetFilePath, 0x00);
+        }
+
+        public bool LinkDirectory(string symbolicLinkDirectoryPath, string targetDirectoryPath)
+        {
+            return CreateSymbolicLink(symbolicLinkDirectoryPath, targetDirectoryPath, 0x01);
         }
 
         public bool EnsureDirectory(string directory)

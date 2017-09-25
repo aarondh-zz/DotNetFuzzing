@@ -10,7 +10,7 @@ namespace DotNetFuzzing.Common
     {
         string InputDirectory { get; }
         string OutputDirectory { get; }
-
+        string DocumentationDirectory { get; }
         string ExtrasDirectory { get; }
         string MasterSyncId { get; }
 
@@ -22,9 +22,13 @@ namespace DotNetFuzzing.Common
 
         string TargetFile { get; }
 
-        TimeSpan Timeout { get; }
+        TimeSpan? Timeout { get; }
 
-        string MemoryLimit { get; }
+        bool SkipTimeouts { get; }
+
+        bool SkipCrashes { get; }
+
+        long MemoryLimit { get; }
 
         bool SkipDeterministic { get; }
         bool UseSplicing { get; }
