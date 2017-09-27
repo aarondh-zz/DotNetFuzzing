@@ -112,7 +112,9 @@
     <Compile Include="Internal\Models\ByteStream.cs" />
     <Compile Include="Internal\Models\EffectorMap.cs" />
     <Compile Include="Internal\Models\ExtraData.cs" />
+    <Compile Include="Internal\Models\NewBitTypes.cs" />
     <Compile Include="Internal\Models\Queue.cs" />
+    <Compile Include="Internal\Models\TraceBits.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Utilities\Hasher.cs" />
     <Compile Include="Utilities\StringExtensions.cs" />

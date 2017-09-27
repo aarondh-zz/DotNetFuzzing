@@ -330,5 +330,7 @@ namespace DotNetFuzzing.Common
            measuring coverage that could be attained by a "dumb" fuzzing algorithm: */
 
         public const bool IGNORE_FINDS = false;
+        public const string FUZZER_STATS_FILENAME = "fuzzer_stats.json";
+        public const string CASE_PREFIX = "id=";
     }
 }

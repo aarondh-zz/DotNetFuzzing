@@ -33,7 +33,11 @@ namespace DotNetFuzzing.Internal.Models
         /// <returns></returns>
         private int EFF_APOS(int value)
         {
+#if SCALE
             return value >> ScalingFactor;
+#else
+            return value;
+#endif
         }
         private int EFF_REM(int value)
         {
@@ -46,7 +50,11 @@ namespace DotNetFuzzing.Internal.Models
         /// <returns></returns>
         private int EFF_ALEN(int value)
         {
+#if SCALE
             return (EFF_APOS(value) + EFF_REM(value));
+#else
+            return value;
+#endif
         }
         /// <summary>
         /// map span for a sequence of bytes
@@ -56,15 +64,18 @@ namespace DotNetFuzzing.Internal.Models
         /// <returns></returns>
         public int EFF_SPAN_ALEN(int position, int length)
         {
+#if SCALE
             return (EFF_APOS((position) + (length) - 1) - EFF_APOS(position) + 1);
+#else
+            return length;
+#endif
         }
         public void MarkAll()
         {
-            var count = _map.Length;
-            var i = 0;
-            while(count-->0)
+            var i = _map.Length;
+            while(i-->0)
             {
-                _map[i++] = 1;
+                _map[i] = 1;
             }
             _count = _map.Length;
         }
@@ -102,7 +113,12 @@ namespace DotNetFuzzing.Internal.Models
         }
         public bool HasNoEffect(int position)
         {
-            return _map[EFF_APOS(position)] == 0;
+            int index = EFF_APOS(position);
+            if ( index >= 0 && index < _map.Length)
+            {
+                return _map[index] == 0;
+            }
+            return true;
         }
         public bool HasNoEffect(int position, int length)
         {

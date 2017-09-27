@@ -32,7 +32,7 @@ namespace DotNetFuzzing.Internal.Models
             /// <summary>
             ///  File name for the test case
             /// </summary>
-            public string FileName { get; set; }
+            public string FilePath { get; set; }
             /// <summary>
             /// Input length
             /// </summary>
@@ -102,7 +102,7 @@ namespace DotNetFuzzing.Internal.Models
             public bool FsRedundant { get; set; }                   /* Marked as redundant in the fs?   */
             public void MarkAsVariable(IFuzzerSettings settings)
             {
-                string entryFileName = Path.GetFileName(FileName);
+                string entryFileName = Path.GetFileName(FilePath);
                 string destinationFileName = $"../../{entryFileName}";
                 string fileName = $"{settings.OutputDirectory}/queue/.state/variable_behavior/{entryFileName}";
 
@@ -120,7 +120,7 @@ namespace DotNetFuzzing.Internal.Models
 
                 this.FsRedundant = redundant;
 
-                var queueFileName = Path.GetFileName(this.FileName);
+                var queueFileName = Path.GetFileName(this.FilePath);
 
                 var filePath = $"{settings.OutputDirectory}/queue/.state/redundant_edges/{queueFileName}";
 
@@ -137,7 +137,7 @@ namespace DotNetFuzzing.Internal.Models
                 }
                 else
                 {
-                    if (!settings.FileSystem.Delete(filePath))
+                    if (!settings.FileSystem.DeleteFile(filePath))
                     {
                         var exception = new Exception($"Unable to remove '{filePath}'");
                         settings.Logger.Fatal(exception, $"Unable to remove '{filePath}'", filePath);
@@ -200,7 +200,7 @@ namespace DotNetFuzzing.Internal.Models
 
             internal void MarkAsDeterministicDone(IFuzzerSettings settings)
             {
-                var queueFileName = Path.GetFileName(this.FileName);
+                var queueFileName = Path.GetFileName(this.FilePath);
                 string filePath = $"{settings.OutputDirectory}/queue/.state/deterministic_done/{queueFileName}";
                 using (var stream = settings.FileSystem.Open(filePath, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
                 {
@@ -309,7 +309,7 @@ namespace DotNetFuzzing.Internal.Models
         {
             var queueEntry = new QueueEntry(this)
             {
-                FileName = fileName,
+                FilePath = fileName,
                 Length = length,
                 Depth = _currentDepth + 1,
                 PassedDeterministic = passedDeterministic

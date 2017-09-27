@@ -1,4 +1,5 @@
-﻿using System;
+﻿using DotNetFuzzing.Utilities;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,12 +13,14 @@ namespace DotNetFuzzing.Internal.Models
         public const int BitsPerByte = 8;
         public const int BitsPerInt16 = BitsPerByte * sizeof(Int16);
         public const int BitsPerInt32 = BitsPerByte * sizeof(Int32);
-        private long _length;
-        private long _position;
-        private byte[] _bytes;
+        protected long _length;
+        protected long _position;
+        protected byte[] _bytes;
         public ByteStream(long capacity = 0)
         {
             SetLength(capacity);
+            _length = 0;
+            _position = 0;
         }
         public ByteStream(byte[] bytes)
         {
@@ -67,7 +70,7 @@ namespace DotNetFuzzing.Internal.Models
                 }
                 if ( _position >= _length)
                 {
-                    SetLength(_position);
+                    SetLength(_position+1);
                 }
             }
         }
@@ -75,9 +78,58 @@ namespace DotNetFuzzing.Internal.Models
         public override void Flush()
         {
         }
-
+        public UInt32 Hash32()
+        {
+            return Hasher.Hash32(_bytes);
+        }
+        public byte this[long index]
+        {
+            get
+            {
+                if (index < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(index));
+                }
+                if ( index < _length)
+                {
+                    return _bytes[index];
+                }
+                else
+                {
+                    return 0;
+                }
+            }
+            set
+            {
+                if ( index < 0 )
+                {
+                    throw new ArgumentOutOfRangeException(nameof(index));
+                }
+                if ( index >= _length)
+                {
+                    SetLength(index+1);
+                }
+                _bytes[index] = value;
+            }
+        }
         public override int Read(byte[] buffer, int offset, int count)
         {
+            if ( buffer == null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+            if (offset < 0 || offset >= buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+            if (count < 0 || offset + count > buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+            if (_position + count > _bytes.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
             unsafe
             {
                 fixed (byte* inp = &buffer[offset])
@@ -142,6 +194,18 @@ namespace DotNetFuzzing.Internal.Models
         }
         public override void Write(byte[] buffer, int offset, int count)
         {
+            if ( buffer == null )
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+            if (offset < 0 || offset >= buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+            if (count < 0 || offset + count > buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
             if (_position + count > _length)
             {
                 SetLength(_position + count);
@@ -153,7 +217,27 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void WriteBytes(ByteStream source, long position, int count)
         {
-            if (_position + count > _length)
+            if (source == null)
+            {
+                throw new ArgumentNullException(nameof(source));
+            }
+            if ( count == 0)
+            {
+                return;
+            }
+            if (position < 0 || position >= source.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(position));
+            }
+            if (count < 0 || position + count > source._bytes.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+            if (_position + count > _bytes.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+            if (_position + count >= _length)
             {
                 SetLength(_position + count);
             }
@@ -166,7 +250,7 @@ namespace DotNetFuzzing.Internal.Models
                     fixed (byte* fixedBytePtr = &_bytes[0])
                     {
                         byte* outp = fixedBytePtr + _position;
-                        if (this == source && (_position >= position || _position + count > position))
+                        if (this == source && ((position >= _position && position < _position + count) || (position < _position && position + count >= _position)))
                         {
                             //source and destination are the same and the input bytes overlap the output bytes
                             //we need an intermediate buffer
@@ -213,6 +297,18 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Write(UInt32[] buffer, int offset, int count)
         {
+            if (buffer == null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+            if (offset < 0 || offset >= buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+            if (count < 0 || offset + count > buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
             int byteCount = count * sizeof(UInt32);
             if (_position + byteCount >= _length)
             {
@@ -237,6 +333,18 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Write(UInt16[] buffer, int offset, int count)
         {
+            if (buffer == null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+            if (offset < 0 || offset >= buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+            if (count < 0 || offset + count > buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
             var byteCount = count * sizeof(UInt16);
             if (_position + byteCount > _length)
             {
@@ -261,6 +369,10 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Write(byte value, int count)
         {
+            if (count < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
             if (_position + count > _length)
             {
                 SetLength(_position + count);
@@ -272,6 +384,10 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Write(UInt16 value, int count)
         {
+            if (count < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
             int byteCount = count * sizeof(UInt16);
             if (_position + byteCount > _length)
             {
@@ -281,18 +397,42 @@ namespace DotNetFuzzing.Internal.Models
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* uint16 = (UInt16*)fixedBytePtr + _position;
+                    UInt16* uint16 = (UInt16*)(fixedBytePtr + _position);
                     _position += byteCount;
-                    while (byteCount-- > 0)
+                    while (count-- > 0)
                     {
                         *(uint16++) = value;
                     }
                 }
             }
         }
+        public void Write(UInt32 value, int count)
+        {
+            if (count < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+            int byteCount = count * sizeof(UInt32);
+            if (_position + byteCount > _length)
+            {
+                SetLength(_position + byteCount);
+            }
+            unsafe
+            {
+                fixed (byte* fixedBytePtr = &_bytes[0])
+                {
+                    UInt32* uintp = (UInt32*)(fixedBytePtr + _position);
+                    _position += byteCount;
+                    while (count-- > 0)
+                    {
+                        *(uintp++) = value;
+                    }
+                }
+            }
+        }
         public bool Equal(byte[] values, long position, int offset, int count)
         {
-            if (position + count >= _length)
+            if (position + count > _length)
             {
                 return false;
             }
@@ -306,29 +446,13 @@ namespace DotNetFuzzing.Internal.Models
             }
             return true;
         }
-        public void Write(UInt32 value, int count)
-        {
-            int byteCount = count * sizeof(UInt32);
-            if (_position + byteCount > _length)
-            {
-                SetLength(_position + byteCount);
-            }
-            unsafe
-            {
-                fixed (byte* fixedBytePtr = &_bytes[0])
-                {
-                    UInt32* uintp = (UInt32*)fixedBytePtr + _position;
-                    _position += byteCount;
-                    while (byteCount-- > 0)
-                    {
-                        *(uintp++) = value;
-                    }
-                }
-            }
-        }
         #region Bit operations
         public void SetBit(bool bit, long position)
         {
+            if (position < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(position));
+            }
             var length = position == 0 ? 1 : position / BitsPerByte + (position % BitsPerByte == 0 ? 0 : 1);
             if (length >= _length)
             {
@@ -349,6 +473,10 @@ namespace DotNetFuzzing.Internal.Models
 
         public bool GetBit(long position)
         {
+            if (position < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(position));
+            }
             var length = position  == 0 ? 1 : position / BitsPerByte + (position % BitsPerByte == 0 ? 0 : 1);
             if (length >= _length)
             {
@@ -364,9 +492,13 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void FlipBit(long position)
         {
+            if (position < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(position));
+            }
             int byteIndex = (int)(position / BitsPerByte);
             int bitOffset = (int)(position % BitsPerByte);
-            if (byteIndex <= _length)
+            if (byteIndex >= _length)
             {
                 SetLength(byteIndex);
             }
@@ -431,22 +563,30 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Xor(UInt16 value)
         {
+            if (_position >= _length - sizeof(UInt16) + 1)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
+                    UInt16* pointer = (UInt16*)(fixedBytePtr + _position);
                     *pointer ^= value;
                 }
             }
         }
         public void Xor(UInt32 value)
         {
+            if (_position >= _length - sizeof(UInt32) + 1)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
+                    UInt32* pointer = (UInt32*)(fixedBytePtr + _position);
                     *pointer ^= value;
                 }
             }
@@ -460,22 +600,30 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Add(UInt16 value)
         {
+            if (_position >= _length - 1)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
+                    UInt16* pointer = (UInt16*)(fixedBytePtr + _position);
                     *pointer += value;
                 }
             }
         }
         public void Add(UInt32 value)
         {
+            if (_position >= _length - 3)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
+                    UInt32* pointer = (UInt32*)(fixedBytePtr + _position);
                     *pointer += value;
                 }
             }
@@ -489,22 +637,30 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Substract(UInt16 value)
         {
+            if ( _position >= _length - 1 )
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
+                    UInt16* pointer = (UInt16*)(fixedBytePtr + _position);
                     *pointer -= value;
                 }
             }
         }
         public void Substract(UInt32 value)
         {
+            if (_position >= _length - 3)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
+                    UInt32* pointer = (UInt32*)(fixedBytePtr + _position);
                     *pointer -= value;
                 }
             }
@@ -518,22 +674,30 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void And(UInt16 value)
         {
+            if (_position >= _length - 1)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
+                    UInt16* pointer = (UInt16*)(fixedBytePtr + _position);
                     *pointer &= value;
                 }
             }
         }
         public void And(UInt32 value)
         {
+            if (_position >= _length - 3)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
+                    UInt32* pointer = (UInt32*)(fixedBytePtr + _position);
                     *pointer &= value;
                 }
             }
@@ -547,22 +711,30 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Func(Func<UInt16, UInt16> func)
         {
+            if (_position >= _length - 1)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
+                    UInt16* pointer = (UInt16*)(fixedBytePtr + _position);
                     *pointer = func(*pointer);
                 }
             }
         }
         public void Func(Func<UInt32, UInt32> func)
         {
+            if (_position >= _length - 3)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
+                    UInt32* pointer = (UInt32*)(fixedBytePtr + _position);
                     *pointer = func(*pointer);
                 }
             }
@@ -576,22 +748,30 @@ namespace DotNetFuzzing.Internal.Models
         }
         public void Or(UInt16 value)
         {
+            if (_position >= _length - 1)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt16* pointer = (UInt16*)fixedBytePtr + _position;
+                    UInt16* pointer = (UInt16*)(fixedBytePtr + _position);
                     *pointer |= value;
                 }
             }
         }
         public void Or(UInt32 value)
         {
+            if (_position >= _length - 3)
+            {
+                throw new InvalidOperationException("Invalid position");
+            }
             unsafe
             {
                 fixed (byte* fixedBytePtr = &_bytes[0])
                 {
-                    UInt32* pointer = (UInt32*)fixedBytePtr + _position;
+                    UInt32* pointer = (UInt32*)(fixedBytePtr + _position);
                     *pointer |= value;
                 }
             }

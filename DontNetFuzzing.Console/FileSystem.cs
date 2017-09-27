@@ -35,11 +35,24 @@ namespace DontNetFuzzing.Console
             return true;
         }
 
-        public bool Delete(string filePath)
+        public bool DeleteFile(string filePath)
         {
             try
             {
                 File.Delete(filePath);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool DeleteDirectory(string filePath)
+        {
+            try
+            {
+                Directory.Delete(filePath, false);
                 return true;
             }
             catch
@@ -84,11 +97,15 @@ namespace DontNetFuzzing.Console
         private class Stream : IStream
         {
             private FileStream _fileStream;
+            private Encoding _encoding;
+            private StreamReader _reader;
+            private StreamWriter _writer;
 
-            public Stream( string path, FileStream fileStream )
+            public Stream( string path, FileStream fileStream, Encoding encoding )
             {
                 Path = path;
                 _fileStream = fileStream;
+                _encoding = encoding;
             }
             public string Path { get; }
             public long Length => _fileStream.Length;
@@ -113,13 +130,13 @@ namespace DontNetFuzzing.Console
             {
                 return _fileStream.Read(buffer, offset, count);
             }
-
-            public string ReadToEnd(Encoding encoding)
+            public string ReadToEnd()
             {
-                using (var reader = new StreamReader(_fileStream))
+                if (_reader == null)
                 {
-                    return reader.ReadToEnd();
+                    _reader = new StreamReader(_fileStream, _encoding);
                 }
+                return _reader.ReadToEnd();
             }
 
             public long Seek(long position)
@@ -138,24 +155,28 @@ namespace DontNetFuzzing.Console
                 return count;
             }
 
-            public int Write(string text)
+            public void Write(string text)
             {
-                using (var writer = new StreamWriter(_fileStream))
+                if (_writer == null)
                 {
-                    writer.Write(text);
+                    _writer = new StreamWriter(_fileStream, _encoding);
                 }
-                return text.Length;
+                _writer.Write(text);
             }
             public override string ToString()
             {
                 return $"{Path}[{Length}]@{Position}";
             }
         }
-        public IStream Open(string filePath, OpenOptions options)
+        public IStream Open(string filePath, OpenOptions options = OpenOptions.ReadOnly, Encoding encoding = null)
         {
             FileAccess access = FileAccess.Read;
             FileMode mode;
             FileShare share;
+            if ( encoding == null )
+            {
+                encoding = Encoding.UTF8;
+            }
             if (options.HasFlag(OpenOptions.Exclusive))
             {
                 share = FileShare.None;
@@ -184,7 +205,21 @@ namespace DontNetFuzzing.Console
             {
                 access = FileAccess.Write;
             }
-            return new Stream(filePath, File.Open(filePath, mode, access, share));
+            return new Stream(filePath, File.Open(filePath, mode, access, share), encoding);
         }
+
+        public bool Rename(string oldPath, string newPath)
+        {
+            try
+            {
+                File.Move(oldPath, newPath);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
     }
 }

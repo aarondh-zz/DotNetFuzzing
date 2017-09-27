@@ -39,7 +39,7 @@ namespace DotNetFuzzing
         private int total_cal_cycles;
         private int total_bitmap_size;
         private int total_bitmap_entries;
-        private byte[] trace_bits = new byte[Constants.MAP_SIZE];
+        private TraceBits _traceBits = new TraceBits(Constants.MAP_SIZE);
         /// <summary>
         /// Patterns found per fuzz stage
         /// </summary>
@@ -77,10 +77,10 @@ namespace DotNetFuzzing
         /// Paths with new coverage bytes
         /// </summary>
         private int queued_with_cov;
-        private byte[] virgin_bits;
-        private byte[] virgin_tmout;
+        private TraceBits virgin_bits;
+        private TraceBits virgin_tmout;
         private bool[] var_bytes;
-        public byte[] virgin_crash { get; private set; }
+        public TraceBits virgin_crash;
 
         public enum StopMode
         {
@@ -127,6 +127,7 @@ namespace DotNetFuzzing
         public Fuzzer()
         {
             _random = new Random();
+            _stats = new FuzzerStatistics();
             var_bytes = new bool[Constants.MAP_SIZE];
         }
         public void Fuzz(IFuzzerSettings settings)
@@ -226,7 +227,7 @@ namespace DotNetFuzzing
 
             var seekTo = FindStartPosition();
 
-            WriteStatsFile(0, 0, 0);
+            WriteStatsFile();
 
             SaveAuto();
 
@@ -314,22 +315,26 @@ namespace DotNetFuzzing
         private void SetupSharedMemoryAndVirginBits()
         {
 
-            virgin_bits = new byte[Constants.MAP_SIZE];
 
             if (_settings.FuzzBitmap == null)
             {
-                virgin_bits = Enumerable.Repeat<byte>(0xff, Constants.MAP_SIZE).ToArray();
+                virgin_bits = new TraceBits(Constants.MAP_SIZE);
+                virgin_bits.Write(0xff, Constants.MAP_SIZE);
             }
             else
             {
                 using (var stream = _settings.FileSystem.Open(_settings.FuzzBitmap, OpenOptions.ReadOnly))
                 {
-                    stream.Read(virgin_bits, 0, Constants.MAP_SIZE);
+                    byte[] buffer = new byte[Constants.MAP_SIZE];
+                    stream.Read(buffer, 0, Constants.MAP_SIZE);
+                    virgin_bits = new TraceBits(buffer);
                     stream.Close();
                 }
             }
-            virgin_tmout = Enumerable.Repeat<byte>(0xff, Constants.MAP_SIZE).ToArray();
-            virgin_crash = Enumerable.Repeat<byte>(0xff, Constants.MAP_SIZE).ToArray();
+            virgin_tmout = new TraceBits(Constants.MAP_SIZE);
+            virgin_tmout.Write(0xff, Constants.MAP_SIZE);
+            virgin_crash = new TraceBits(Constants.MAP_SIZE);
+            virgin_crash.Write(0xff, Constants.MAP_SIZE);
 #if never
         shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
 
@@ -357,7 +362,7 @@ namespace DotNetFuzzing
         {
             var outputFileName = $"{_settings.OutputDirectory}/.cur_input";
 
-            _settings.FileSystem.Delete(outputFileName); /* Ignore errors */
+            _settings.FileSystem.DeleteFile(outputFileName); /* Ignore errors */
 
             _outputStream = _settings.FileSystem.Open(outputFileName, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.ReadWrite);
         }
@@ -374,7 +379,7 @@ namespace DotNetFuzzing
             if (_settings.TargetFile != null)
             {
                 var fileSystem = _settings.FileSystem;
-                fileSystem.Delete(_settings.TargetFile); //ignore errors
+                fileSystem.DeleteFile(_settings.TargetFile); //ignore errors
                 using (var stream = fileSystem.Open(_settings.TargetFile, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
                 {
                     stream.Write(buffer, 0, length);
@@ -405,7 +410,7 @@ namespace DotNetFuzzing
             if (_settings.TargetFile != null)
             {
                 var fileSystem = _settings.FileSystem;
-                fileSystem.Delete(_settings.TargetFile); //ignore errors
+                fileSystem.DeleteFile(_settings.TargetFile); //ignore errors
                 using (var stream = fileSystem.Open(_settings.TargetFile, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
                 {
                     if (skip_at > 0) stream.Write(buffer, 0, skip_at);
@@ -453,69 +458,7 @@ namespace DotNetFuzzing
             FAULT_CRASH,
             FAULT_STOPPING
         }
-        [Flags]
-        public enum NewBitTypes
-        {
-            NoNewBits = 0x00,
-            HitCount = 0x01,
-            NewTuple = 0x02
-        }
-        /// <summary>
-        /// Check if the current execution path brings anything new to the table.
-        /// Update virgin bits to reflect the finds.Returns NewBitTypes.HitCount if the only change is
-        /// the hit-count for a particular tuple; NewBitTypes.NewTuple if there are new tuples seen.
-        /// Updates the map, so subsequent calls will always return 0.
-        /// 
-        /// This function is called after every exec() on a fairly large buffer, so
-        /// it needs to be fast. We do this in 32-bit and 64-bit flavors.
-        /// </summary>
-        /// <param name="virgin_map"></param>
-        /// <param name="trace_bits"></param>
-        /// <returns></returns>
-        private NewBitTypes HasNewBits(byte[] virgin_map, byte[] trace_bits)
-        {
-            int i = trace_bits.Length;
 
-            NewBitTypes ret = 0;
-
-            while (i-- > 0)
-            {
-                byte cur = trace_bits[i];
-                byte vir = virgin_map[i];
-
-                if (cur != 0 && (cur & vir) != 0)
-                {
-                    if (ret != NewBitTypes.NewTuple)
-                    {
-                        if (cur != 0 && vir == 0xff)
-                        {
-                            return NewBitTypes.NewTuple;
-                        }
-                        else
-                        {
-                            ret = NewBitTypes.HitCount;
-                        }
-                    }
-                    virgin_map[i] &= (byte)~cur;
-                }
-            }
-            return ret;
-        }
-        private int CountBytes(byte[] map)
-        {
-            int i = map.Length;
-            int count = 0;
-
-            while (i-- > 0)
-            {
-                if (map[i] != 0)
-                {
-                    count++;
-                }
-            }
-
-            return count;
-        }
         private int CountBytes(bool[] map)
         {
             int i = map.Length;
@@ -629,7 +572,7 @@ namespace DotNetFuzzing
 
             return (int)perf_score;
         }
-        private byte[] _firstTrace = new byte[Constants.MAP_SIZE];
+        private ByteStream _firstTrace = new ByteStream(Constants.MAP_SIZE);
         private int havoc_div = 1;
         private bool auto_changed;
 
@@ -675,9 +618,10 @@ namespace DotNetFuzzing
             if (!_settings.DumbMode && !_settings.NoForkServer && _settings.MasterSyncId == null)
                 InitForkserver();
 
-            if (q.ExecutionTraceChecksum > 0)
+            if (q.ExecutionTraceChecksum != 0)
             {
-                Array.Copy(_firstTrace, trace_bits, Constants.MAP_SIZE);
+                _firstTrace.Seek(0L, SeekOrigin.Begin);
+                _firstTrace.WriteBytes(_traceBits, 0, (int)_traceBits.Length);
             }
 
             start_us = DateTime.Now;
@@ -704,18 +648,18 @@ namespace DotNetFuzzing
                     goto abort_calibration;
                 }
 
-                if (!_settings.DumbMode && stage_cur == 0 && CountBytes(trace_bits) > 0)
+                if (!_settings.DumbMode && stage_cur == 0 && _traceBits.CountBytes() > 0)
                 {
                     runResult.Outcome = FuzzOutcomes.FAULT_NOINST;
                     goto abort_calibration;
                 }
 
-                cksum = Hasher.Hash32(trace_bits);
+                cksum = _traceBits.Hash32();
 
                 if (q.ExecutionTraceChecksum != cksum)
                 {
 
-                    var hnb = HasNewBits(virgin_bits, trace_bits);
+                    var hnb = virgin_bits.HasNewBits(_traceBits);
                     if (hnb > new_bits)
                     {
                         new_bits = hnb;
@@ -730,7 +674,7 @@ namespace DotNetFuzzing
                         for (i = 0; i < Constants.MAP_SIZE; i++)
                         {
 
-                            if (!var_bytes[i] && _firstTrace[i] != trace_bits[i])
+                            if (!var_bytes[i] && _firstTrace[i] != _traceBits[i])
                             {
 
                                 var_bytes[i] = true;
@@ -747,8 +691,8 @@ namespace DotNetFuzzing
                     {
 
                         q.ExecutionTraceChecksum = cksum;
-                        Array.Copy(_firstTrace, trace_bits, Constants.MAP_SIZE);
-
+                        _firstTrace.Seek(0L, SeekOrigin.Begin);
+                        _firstTrace.WriteBytes(_traceBits, 0, (int)_traceBits.Length);
                     }
 
                 }
@@ -763,14 +707,14 @@ namespace DotNetFuzzing
                This is used for fuzzing air time calculations in calculate_score(). */
 
             q.ExecutionTimeUs = (int)(stop_us - start_us).TotalMilliseconds / stage_max;
-            q.BitmapSize = CountBytes(trace_bits);
+            q.BitmapSize = _traceBits.CountBytes();
             q.Handicap = handicap;
             q.CalibrationFailed = 0;
 
             total_bitmap_size += q.BitmapSize;
             total_bitmap_entries++;
 
-            UpdateBitmapScore(q, trace_bits, top_rated);
+            UpdateBitmapScore(q, _traceBits, top_rated);
 
             /* If this case didn't result in new output from the instrumentation, tell
                parent. This is a non-critical problem, but something to warn the user
@@ -851,7 +795,7 @@ namespace DotNetFuzzing
         /// </summary>
         /// <param name="dst"></param>
         /// <param name="src"></param>
-        private static void MinimizeBits(byte[] dst, byte[] src)
+        private static void MinimizeBits(byte[] dst, ByteStream src)
         {
 
             int i = 0;
@@ -880,10 +824,10 @@ namespace DotNetFuzzing
         /// contender, or if the contender has a more favorable speed x size factor.
         /// </summary>
         /// <param name="q"></param>
-        /// <param name="trace_bits"></param>
+        /// <param name="traceBits"></param>
         /// <param name="topRated"></param>
         /// <returns>true if the score changed</returns>
-        public static bool UpdateBitmapScore(QueueEntry q, byte[] trace_bits, QueueEntry[] topRated)
+        public static bool UpdateBitmapScore(QueueEntry q, ByteStream traceBits, QueueEntry[] topRated)
         {
 
             int i;
@@ -895,7 +839,7 @@ namespace DotNetFuzzing
 
             for (i = 0; i < Constants.MAP_SIZE; i++)
 
-                if (trace_bits[i] != 0)
+                if (traceBits[i] != 0)
                 {
 
                     if (topRated[i] != null)
@@ -923,7 +867,7 @@ namespace DotNetFuzzing
                     if (q.TraceMini == null)
                     {
                         q.TraceMini = new byte[Constants.MAP_SIZE >> 3];
-                        MinimizeBits(q.TraceMini, trace_bits);
+                        MinimizeBits(q.TraceMini, traceBits);
                     }
 
                     scoreChanged = true;
@@ -957,7 +901,7 @@ namespace DotNetFuzzing
         private FuzzOutcomes TrimCase(QueueEntry q, byte[] in_buf)
         {
             string tmp = null;
-            byte[] clean_trace = new byte[Constants.MAP_SIZE];
+            ByteStream clean_trace = new ByteStream(Constants.MAP_SIZE);
 
             bool needs_write = false;
             FuzzOutcomes fault = FuzzOutcomes.Success;
@@ -1016,7 +960,7 @@ namespace DotNetFuzzing
 
                     /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
 
-                    cksum = Hasher.Hash32(trace_bits);
+                    cksum = _traceBits.Hash32();
 
                     /* If the deletion had no impact on the trace, make it permanent. This
                        isn't perfect for variable-path inputs, but we're just making a
@@ -1039,7 +983,8 @@ namespace DotNetFuzzing
                         {
 
                             needs_write = true;
-                            Array.Copy(clean_trace, trace_bits, Constants.MAP_SIZE);
+                            clean_trace.Seek(0L, SeekOrigin.Begin);
+                            clean_trace.WriteBytes(_traceBits, 0, (int)_traceBits.Length);
 
                         }
 
@@ -1066,17 +1011,17 @@ namespace DotNetFuzzing
             if (needs_write)
             {
 
-                _settings.FileSystem.Delete(q.FileName); /* ignore errors */
+                _settings.FileSystem.DeleteFile(q.FilePath); /* ignore errors */
 
-                using (var stream = _settings.FileSystem.Open(q.FileName, OpenOptions.ReadOnly | OpenOptions.Create | OpenOptions.Exclusive))
+                using (var stream = _settings.FileSystem.Open(q.FilePath, OpenOptions.ReadOnly | OpenOptions.Create | OpenOptions.Exclusive))
                 {
                     stream.Write(in_buf, 0, q.Length);
                     stream.Flush();
                     stream.Close();
                 }
-
-                Array.Copy(trace_bits, clean_trace, Constants.MAP_SIZE);
-                UpdateBitmapScore(q, trace_bits, top_rated);
+                _traceBits.Seek(0L, SeekOrigin.Begin);
+                _traceBits.WriteBytes(clean_trace, 0, (int)clean_trace.Length);
+                UpdateBitmapScore(q, _traceBits, top_rated);
 
             }
 
@@ -1146,12 +1091,6 @@ namespace DotNetFuzzing
             return ret;
 
         }
-        /* Destructively simplify trace by eliminating hit count information
-   and replacing it with 0x80 or 0x01 depending on whether the tuple
-   is hit or not. Called on every new crash or timeout, should be
-   reasonably fast. */
-
-        private static readonly byte[] _simplifyLookup = new byte[256];
         private string syncing_party;
         private int syncing_case;
         private bool _inPlaceResume;
@@ -1165,32 +1104,6 @@ namespace DotNetFuzzing
         }
         private TimeOutTypes _timeoutType;
         private int _uselessTestCasesAtStart;
-
-        static Fuzzer() {
-            _simplifyLookup[0] = 1;
-            for (int i = 1; i < _simplifyLookup.Length; i++)
-            {
-                _simplifyLookup[i] = 128;
-            }
-        }
-        static void SimplifyTrace(byte[] traceBits)
-        {
-
-            int i = traceBits.Length;
-
-            while (i-- >= 0)
-            {
-                /* Optimize for sparse bitmaps. */
-                byte entry = traceBits[i];
-                if (entry != 0)
-                {
-                    traceBits[i] = _simplifyLookup[entry];
-                }
-                else {
-                    traceBits[i] = 0x01;
-                }
-            }
-        }
 
         /// <summary>
         /// Check if the result of an execve() during routine fuzzing is interesting,
@@ -1215,7 +1128,7 @@ namespace DotNetFuzzing
 
                 /* Keep only if there are new bits in the map, add to queue for
                    future fuzzing, etc. */
-                if ((hnb = HasNewBits(virgin_bits, trace_bits)) == NewBitTypes.NoNewBits)
+                if ((hnb = virgin_bits.HasNewBits(_traceBits)) == NewBitTypes.NoNewBits)
                 {
                     if (_settings.CrashMode) _stats.total_crashes++;
                     return false;
@@ -1236,7 +1149,7 @@ namespace DotNetFuzzing
                     queued_with_cov++;
                 }
 
-                newQueuedEntry.ExecutionTraceChecksum = Hasher.Hash32(trace_bits);
+                newQueuedEntry.ExecutionTraceChecksum = _traceBits.Hash32();
 
                 /* Try to calibrate inline; this also calls update_bitmap_score() when
                    successful. */
@@ -1275,9 +1188,9 @@ namespace DotNetFuzzing
                     if (!_settings.DumbMode)
                     {
 
-                        SimplifyTrace(trace_bits);
+                        _traceBits.SimplifyTrace();
 
-                        if (HasNewBits(virgin_tmout, trace_bits) == 0) return keeping;
+                        if (virgin_tmout.HasNewBits(_traceBits) == 0) return keeping;
 
                     }
 
@@ -1333,9 +1246,9 @@ namespace DotNetFuzzing
 
                     if (!_settings.DumbMode)
                     {
-                        SimplifyTrace(trace_bits);
+                        _traceBits.SimplifyTrace();
 
-                        if (HasNewBits(virgin_crash, trace_bits) == 0) return keeping;
+                        if (virgin_crash.HasNewBits(_traceBits) == 0) return keeping;
 
                     }
 
@@ -1359,7 +1272,6 @@ namespace DotNetFuzzing
                 case FuzzOutcomes.FAULT_ERROR:
                     _settings.Logger.Fatal("Unable to execute target application");
                     throw new Exception("Unable to execute target application");
-                    break;
                 default:
                     return keeping;
 
@@ -1485,7 +1397,12 @@ namespace DotNetFuzzing
             /* Skip runs of identical bytes. */
 
             for (i = 1; i < len; i++)
-                if ((mem[0] ^ mem[i]) != 0) break;
+            {
+                if ((mem[0] ^ mem[i]) != 0)
+                {
+                    break;
+                }
+            }
 
             if (i == len) return;
 
@@ -1917,22 +1834,22 @@ namespace DotNetFuzzing
             }
             if (_settings.LogLevel == LogLevel.Verbose)
             {
-                _settings.Logger.Verbose("Fuzzing test case {@currentQueue} ({queuedPaths} total, {uniqueCrashes} uniq crashes found)...",
-                     currentQueue, _queue.Count, _stats.unique_crashes);
+                _settings.Logger.Verbose("Fuzzing test case #{testCaseNumber}: {testCaseName} ({queuedPaths} total, {uniqueCrashes} unique crashes found)...",
+                     currentEntry, Path.GetFileName(currentQueue.FilePath), _queue.Count, _stats.unique_crashes);
             }
 
             /* Map the test case into memory. */
             int length;
             byte[] orig_in;
             byte[] in_buf;
-            using (var stream = _settings.FileSystem.Open(currentQueue.FileName, OpenOptions.ReadOnly))
+            using (var stream = _settings.FileSystem.Open(currentQueue.FilePath, OpenOptions.ReadOnly))
             {
                 length = currentQueue.Length;
                 orig_in = in_buf = new byte[length];
                 var bytesRead = stream.Read(orig_in, 0, length);
                 if (bytesRead != length)
                 {
-                    _settings.Logger.Error("Unable to mmap '{fileName}'", currentQueue.FileName);
+                    _settings.Logger.Error("Unable to map '{filePath}'", currentQueue.FilePath);
                 }
             }
             /* We could mmap() out_buf as MAP_PRIVATE, but we end up clobbering every
@@ -1940,6 +1857,7 @@ namespace DotNetFuzzing
                benefits. */
 
             var out_buf = new ByteStream(length);
+            out_buf.SetLength(length);
             var subseq_tmouts = 0;
             var cur_depth = currentQueue.Depth;
 
@@ -2085,7 +2003,7 @@ namespace DotNetFuzzing
 
                 if (!_settings.DumbMode && (stage_cur & 7) == 7) {
 
-                    uint cksum = Hasher.Hash32(trace_bits);
+                    uint cksum = _traceBits.Hash32();
 
                     if (stage_cur == stage_max - 1 && cksum == prev_cksum)
                     {
@@ -2225,7 +2143,7 @@ namespace DotNetFuzzing
                        without wasting time on checksums. */
 
                     if (!_settings.DumbMode && length >= Constants.EFF_MIN_LEN)
-                        cksum = Hasher.Hash32(trace_bits);
+                        cksum = _traceBits.Hash32();
                     else
                         cksum = ~currentQueue.ExecutionTraceChecksum;
 
@@ -2267,7 +2185,6 @@ namespace DotNetFuzzing
             stage_max = length - 1;
 
             orig_hit_cnt = new_hit_cnt;
-
             for (int i = 0; i < length - 1; i++) {
 
                 /* Let's consult the effector map... */
@@ -3032,8 +2949,9 @@ namespace DotNetFuzzing
                 var stage_cur_val = use_stacking;
 
                 for (var i = 0; i < use_stacking; i++) {
-
-                    switch (Randomize(15 + ((_extras.Count + _autoExtras.Count) > 0 ? 2 : 0))) {
+                    int havocOperation = Randomize(15 + ((_extras.Count + _autoExtras.Count) > 0 ? 2 : 0));
+                    _settings.Logger.Verbose("current stage: {currentStage} havoc operation: {havocOperation}", stage_cur, havocOperation);
+                    switch (havocOperation) {
 
                         case 0:
 
@@ -3261,7 +3179,7 @@ namespace DotNetFuzzing
                                     out_buf.Seek(Randomize(temp_len), SeekOrigin.Begin);
                                     byte[] randomFromOutBuf = new byte[1];
                                     out_buf.Read(randomFromOutBuf, 0, 1);
-                                    new_buf.Write(randomFromOutBuf, 0, clone_len);
+                                    new_buf.Write(randomFromOutBuf[0], clone_len);
                                 }
                                 else
                                 {
@@ -3497,7 +3415,7 @@ namespace DotNetFuzzing
 
                     /* Read the testcase into a new buffer. */
 
-                    using (var stream = _settings.FileSystem.Open(target.FileName, OpenOptions.ReadOnly))
+                    using (var stream = _settings.FileSystem.Open(target.FilePath, OpenOptions.ReadOnly))
                     {
                         byte[] buffer = new byte[target.Length];
                         stream.Read(buffer, 0, target.Length);
@@ -3595,15 +3513,24 @@ namespace DotNetFuzzing
 
         private void ShowStats()
         {
+            var logger = _settings.Logger;
+            logger.Information($"Current stage: {stage_name}");
         }
 
         private void SaveAuto()
         {
         }
 
-        private void WriteStatsFile(int v1, int v2, int v3)
+        private void WriteStatsFile()
         {
-            throw new NotImplementedException();
+            var statsFilePath = $"{_settings.OutputDirectory}/{Constants.FUZZER_STATS_FILENAME}";
+            _settings.FileSystem.DeleteFile(statsFilePath); //ignore fail
+            using (var stream = _settings.FileSystem.Open(statsFilePath, OpenOptions.Create | OpenOptions.WriteOnly | OpenOptions.Exclusive))
+            {
+                stream.Write(JsonConvert.SerializeObject(_stats));
+                stream.Flush();
+                stream.Close();
+            }
         }
 
         private long FindStartPosition()
@@ -3627,7 +3554,7 @@ namespace DotNetFuzzing
             {
                 using (var stream = _settings.FileSystem.Open(fileName, OpenOptions.ReadOnly))
                 {
-                    var fuzzerStatisticsSource = stream.ReadToEnd(Encoding.UTF8);
+                    var fuzzerStatisticsSource = stream.ReadToEnd();
 
                     stream.Close();
 
@@ -3748,11 +3675,11 @@ namespace DotNetFuzzing
    
         private void check_map_coverage()
         {
-            if (CountBytes(trace_bits) < 100) return;
+            if (_traceBits.CountBytes() < 100) return;
 
             for (int i = (1 << (Constants.MAP_SIZE_POW2 - 1)); i < Constants.MAP_SIZE; i++)
             {
-                if (trace_bits[i] != 0) return;
+                if (_traceBits[i] != 0) return;
             }
 
             _settings.Logger.Warning("Recompile binary with newer version of afl to improve coverage!");
@@ -3773,11 +3700,11 @@ namespace DotNetFuzzing
                 byte[] use_mem;
                 RunResult res;
 
-                var fileName = Path.GetFileName(q.FileName);
+                var fileName = Path.GetFileName(q.FilePath);
 
                 _settings.Logger.Information($"Attempting dry run with '{fileName}'...");
 
-                using (var stream = _settings.FileSystem.Open(q.FileName, OpenOptions.ReadOnly))
+                using (var stream = _settings.FileSystem.Open(q.FilePath, OpenOptions.ReadOnly))
                 {
                     use_mem = new Byte[q.Length];
                     if (use_mem.Length != stream.Read(use_mem, 0, use_mem.Length))
@@ -3974,17 +3901,17 @@ namespace DotNetFuzzing
                 return;
             }
             if (_settings.ResumeInplace) {
-                statsFilePath = $"{_settings.InputDirectory}/fuzzer_stats";
+                statsFilePath = $"{_settings.InputDirectory}/{Constants.FUZZER_STATS_FILENAME}";
             }
             else {
-                statsFilePath = $"{_settings.InputDirectory}/../fuzzer_stats";
+                statsFilePath = $"{_settings.InputDirectory}/../{Constants.FUZZER_STATS_FILENAME}";
             }
             if ( _settings.FileSystem.FileExists(statsFilePath))
             {
                 FuzzerStatistics fuzzerStatistics;
                 using (var stream = _settings.FileSystem.Open(statsFilePath, OpenOptions.ReadOnly))
                 {
-                    fuzzerStatistics = JsonConvert.DeserializeObject<FuzzerStatistics>(stream.ReadToEnd(Encoding.UTF8));
+                    fuzzerStatistics = JsonConvert.DeserializeObject<FuzzerStatistics>(stream.ReadToEnd());
                     stream.Close();
                     if ( !fuzzerStatistics.exec_timeout.HasValue )
                     {
@@ -4021,7 +3948,7 @@ namespace DotNetFuzzing
             while (q != null)
             {
 
-                var fileName = Path.GetFileName(q.FileName);
+                var fileName = Path.GetFileName(q.FilePath);
                 int orig_id;
 
                 /* If the original file name conforms to the syntax and the recorded
@@ -4085,11 +4012,11 @@ namespace DotNetFuzzing
                 }
 
                 /* Pivot to the new queue entry. */
-                if ( !_settings.FileSystem.LinkFile(useFilePath, q.FileName) )
+                if ( !_settings.FileSystem.LinkFile(useFilePath, q.FilePath) )
                 {
-                    _settings.FileSystem.Copy(q.FileName, useFilePath);
+                    _settings.FileSystem.Copy(q.FilePath, useFilePath);
                 }
-                q.FileName = useFilePath;
+                q.FilePath = useFilePath;
 
                 /* Make sure that the passed_det value carries over, too. */
 
@@ -4217,15 +4144,219 @@ namespace DotNetFuzzing
         {
             public FuzzOutcomes Outcome { get; set; }
             public int Reason { get; set; }
+
+            public override string ToString()
+            {
+                return $"Outcome = {Outcome}, Reason = {Reason}";
+            }
         }
         private RunResult RunTarget( int timeout )
         {
-            _stats.total_executions++;
-            throw new NotImplementedException();
+             _stats.total_executions++;
+            _traceBits.Seek(0L, SeekOrigin.Begin);
+            _traceBits.Write(0, (int)_traceBits.Length);
+            return new RunResult { Outcome = FuzzOutcomes.Success, Reason = 404 };
+        }
+        private bool DeleteFiles(string directoryPath, string prefix = null)
+        {
+            var fileSystem = _settings.FileSystem;
+            if ( fileSystem.DirectoryExists(directoryPath))
+            {
+                foreach( var filePath in fileSystem.EnumerateFiles(directoryPath))
+                {
+                    if ( prefix == null || Path.GetFileName(filePath).StartsWith(prefix) )
+                    {
+                        if (!fileSystem.DeleteFile(filePath))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+       private bool DeleteFilesAndDirectory(string directoryPath, string prefix = null)
+        {
+            if ( DeleteFiles(directoryPath,prefix))
+            {
+                return DeleteDirectory(directoryPath);
+            }
+            return false;
+        }
+       private bool DeleteDirectory(string directoryPath)
+        {
+            if (_settings.FileSystem.DirectoryExists(directoryPath))
+            {
+                return _settings.FileSystem.DeleteDirectory(directoryPath);
+            }
+            return false;
+        }
+        private bool DeleteFile(string filePath)
+        {
+            if (_settings.FileSystem.FileExists(filePath))
+            {
+                return _settings.FileSystem.DeleteFile(filePath);
+            }
+            return false;
         }
         private void MaybeDeleteOutputDirectory()
         {
+            string lastDeletePath = null;
 
+            var fuzzerStatsPath = $"{_settings.OutputDirectory}/{Constants.FUZZER_STATS_FILENAME}";
+            FuzzerStatistics lastStats = null;
+            try
+            {
+                using (var stream = _settings.FileSystem.Open(fuzzerStatsPath, OpenOptions.Exclusive | OpenOptions.ReadOnly))
+                {
+                    lastStats = JsonConvert.DeserializeObject<FuzzerStatistics>(stream.ReadToEnd());
+                    stream.Close();
+                }
+            }
+            catch
+            {
+                _settings.Logger.Fatal("Unable to open '{fuzzerStatsPath}", fuzzerStatsPath);
+            }
+
+            if (lastStats != null)
+            {
+                /* Let's see how much work is at stake. */
+
+                if (!_settings.ResumeInplace
+                    && lastStats.last_update.HasValue
+                    && lastStats.start_time.HasValue
+                    && (lastStats.last_update.Value - lastStats.start_time.Value).TotalSeconds > Constants.OUTPUT_GRACE * 60)
+                {
+
+                    _settings.Logger.Information("The job output directory already exists and contains the results of more\n" +
+                         "    than {graceMinutes} minutes worth of fuzzing. To avoid data loss, afl-fuzz will *NOT*\n" +
+                         "    automatically delete this data for you.\n\n" +
+                         "    If you wish to start a new session, remove or rename the directory manually,\n" +
+                         "    or specify a different output location for this job. To resume the old\n" +
+                         "    session, put '-' as the input directory in the command line ('-i -') and\n" +
+                         "    try again.\n", Constants.OUTPUT_GRACE);
+
+                    _settings.Logger.Fatal("At-risk data found in '{outputDirectory}'", _settings.OutputDirectory);
+                    throw new Exception($"At-risk data found in '{_settings.OutputDirectory}'");
+
+                }
+
+            }
+
+            /* The idea for in-place resume is pretty simple: we temporarily move the old
+               queue/ to a new location that gets deleted once import to the new queue/
+               is finished. If _resume/ already exists, the current queue/ may be
+               incomplete due to an earlier abort, so we want to use the old _resume/
+               dir instead, and we let rename() fail silently. */
+
+            if (_settings.ResumeInplace)
+            {
+
+                _settings.FileSystem.Rename($"{_settings.OutputDirectory}/queue", $"{_settings.OutputDirectory}/_resume"); /* Ignore errors */
+
+                _settings.Logger.Information("Output directory exists, will attempt session resume.");
+            }
+            else
+            {
+                _settings.Logger.Information("Output directory exists but deemed OK to reuse.");
+            }
+
+            _settings.Logger.Information("Deleting old session data...");
+
+            /* Okay, let's get the ball rolling! First, we need to get rid of the entries
+               in <out_dir>/.synced/.../id:*, if any are present. */
+
+            if (!_settings.ResumeInplace)
+            {
+                lastDeletePath = $"{_settings.OutputDirectory}/.synced";
+                if (!DeleteFiles(lastDeletePath) ) goto dir_cleanup_failed;
+            }
+
+            /* Next, we need to clean up <out_dir>/queue/.state/ subdirectories: */
+            lastDeletePath = $"{_settings.OutputDirectory}/queue/.state/deterministic_done";
+            if (!DeleteFilesAndDirectory(lastDeletePath)) goto dir_cleanup_failed;
+            lastDeletePath = $"{_settings.OutputDirectory}/queue/.state/auto_extras";
+            if (!DeleteFilesAndDirectory(lastDeletePath)) goto dir_cleanup_failed;
+            lastDeletePath = $"{_settings.OutputDirectory}/queue/.state/redundant_edges";
+            if (!DeleteFilesAndDirectory(lastDeletePath)) goto dir_cleanup_failed;
+            lastDeletePath = $"{_settings.OutputDirectory}/queue/.state/variable_behavior";
+            if (!DeleteFilesAndDirectory(lastDeletePath)) goto dir_cleanup_failed;
+            /* Then, get rid of the .state subdirectory itself (should be empty by now)
+               and everything matching <out_dir>/queue/id:*. */
+
+            lastDeletePath = $"{_settings.OutputDirectory}/queue/.state";
+            if (!DeleteDirectory(lastDeletePath)) goto dir_cleanup_failed;
+
+            lastDeletePath = $"{_settings.OutputDirectory}/queue";
+            if (!DeleteFilesAndDirectory(lastDeletePath)) goto dir_cleanup_failed;
+
+            /* All right, let's do <out_dir>/crashes/id:* and <out_dir>/hangs/id:*. */
+
+            if (!_settings.ResumeInplace)
+            {
+                _settings.FileSystem.DeleteFile($"{_settings.OutputDirectory}/crashes/README.txt");
+            }
+
+            var crashesPath = $"{_settings.OutputDirectory}/crashes";
+
+            /* Make backup of the crashes directory if it's not empty and if we're
+               doing in-place resume. */
+
+            if (_settings.ResumeInplace && _settings.FileSystem.DirectoryExists(crashesPath))
+            {
+
+                var now = DateTime.Now;
+
+                string backupCrashesPath = $"{_settings.OutputDirectory}/{now.Year}-{now.Month}-{now.Day}-{now.Hour}-{now.Minute}-{now.Second}-{now.Millisecond}-crashes";
+                _settings.FileSystem.Rename(crashesPath, backupCrashesPath);
+            }
+            lastDeletePath = crashesPath;
+            if (!DeleteFilesAndDirectory(lastDeletePath, Constants.CASE_PREFIX)) goto dir_cleanup_failed;
+
+            /* Backup hangs, too. */
+            var hangsPath = $"{_settings.OutputDirectory}/hangs";
+
+            if (_settings.ResumeInplace && _settings.FileSystem.DirectoryExists(hangsPath))
+            {
+
+                var now = DateTime.Now;
+
+                string backupHangsPath = $"{_settings.OutputDirectory}/{now.Year}-{now.Month}-{now.Day}-{now.Hour}-{now.Minute}-{now.Second}-{now.Millisecond}-hangs";
+                _settings.FileSystem.Rename(hangsPath, backupHangsPath);
+
+
+            }
+
+            lastDeletePath = hangsPath;
+            if (!DeleteFilesAndDirectory(hangsPath, Constants.CASE_PREFIX)) goto dir_cleanup_failed;
+
+            /* And now, for some finishing touches. */
+
+            DeleteFile($"{_settings.OutputDirectory}/.cur_input");
+            DeleteFile($"{_settings.OutputDirectory}/fuzz_bitmap");
+
+            if (!_settings.ResumeInplace)
+            {
+                DeleteFile(fuzzerStatsPath);
+            }
+
+            _settings.Logger.Information("Output dir cleanup successful.");
+
+            /* Wow... is that all? If yes, celebrate! */
+
+            return;
+
+            dir_cleanup_failed:
+
+            _settings.Logger.Information("Whoops, the fuzzer tried to reuse your output directory, but bumped into\n" +
+       "    some files that shouldn't be there or that couldn't be removed - so it\n" +
+       "    decided to abort! This happened while processing this path:\n\n" +
+       "    {deletePath}\n\n" +
+       "    Please examine and manually delete the files, or specify a different\n" +
+       "    output location for the tool.\n", lastDeletePath);
+
+            _settings.Logger.Fatal("Output directory cleanup failed");
+            throw new Exception("Output directory cleanup failed");
         }
         private void EnsureOutputDirectory(string directory)
         {

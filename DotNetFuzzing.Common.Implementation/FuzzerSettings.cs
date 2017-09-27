@@ -99,7 +99,22 @@ namespace DotNetFuzzing.Common.Implementation
 
         public bool IgnoreFinds{ get; set; }
 
-        public int StatsUpdateFrequency { get; set; }
+        private int _statsUpdateFrequency;
+        public int StatsUpdateFrequency
+        {
+            get
+            {
+                if (_statsUpdateFrequency == 0 )
+                {
+                    return 1;
+                }
+                return _statsUpdateFrequency;
+            }
+            set
+            {
+                _statsUpdateFrequency = value;
+            }
+        }
 
         public bool RunOver10M{ get; set; }
 

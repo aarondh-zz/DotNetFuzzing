@@ -1,4 +1,5 @@
 ﻿using DotNetFuzzing.Common;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -71,11 +72,32 @@ namespace DontNetFuzzing.Console
             }
             public string Format(object[] arguments)
             {
-                return string.Format(_formatString, arguments);
+                object[] formattedArguments = null;
+                if (arguments != null) {
+                    formattedArguments = new object[arguments.Length];
+                    for (int i = 0; i < _tokens.Count; i++)
+                    {
+                        var token = _tokens[i];
+                        switch (token.Type)
+                        {
+                            case Token.Types.Decompose:
+                                formattedArguments[i] = Decompose(arguments[i]);
+                                break;
+                            case Token.Types.ValueOf:
+                                formattedArguments[i] = ValueOf(arguments[i]);
+                                break;
+                            case Token.Types.Default:
+                            default:
+                                formattedArguments[i] = ToDefault(arguments[i]);
+                                break;
+                        }
+                    }
+                }
+                return string.Format(_formatString, formattedArguments);
             }
             public string Decompose(object value)
             {
-                return value.ToString();
+                return JsonConvert.SerializeObject(value);
             }
             public string ValueOf(object value)
             {
