@@ -84,5 +84,7 @@ namespace DotNetFuzzing.Common
 
         bool FastCal { get; }
         bool SimpleFiles { get; }
+
+        ITargetInitiator TargetInitiator { get; }
     }
 }

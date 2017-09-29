@@ -183,7 +183,7 @@ namespace DontNetFuzzing.Console
             }
             else
             {
-                share = FileShare.Read;
+                share = FileShare.ReadWrite;
             }
             if (options.HasFlag(OpenOptions.Create))
             {

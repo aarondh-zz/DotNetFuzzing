@@ -3,13 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26730.15
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotNetFuzzing.Fuzzer", "DotNetFuzzing\DotNetFuzzing.Fuzzer.csproj", "{D6CB99AE-81CE-423E-B366-A0501E68A2E5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotNetFuzzing.Fuzzing", "DotNetFuzzing\DotNetFuzzing.Fuzzing.csproj", "{D6CB99AE-81CE-423E-B366-A0501E68A2E5}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotNetFuzzingApp", "DotNetFuzzingApp\DotNetFuzzingApp.csproj", "{C71AE416-2F49-40C8-9C20-3FDCD8F3305E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotNetFuzzing.Common", "DotNetFuzzing.Common\DotNetFuzzing.Common.csproj", "{F684DBB2-E163-487D-BD5C-1FF446F965EE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DontNetFuzzing.Console", "DontNetFuzzing.Console\DontNetFuzzing.Console.csproj", "{55B5A8EF-C8CA-4178-BE2B-E4675980FB73}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DontNetFuzzing.Console", "DontNetFuzzing.Console\DontNetFuzzing.Console.csproj", "{55B5A8EF-C8CA-4178-BE2B-E4675980FB73}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotNetFuzzing.Common.Implementation", "DotNetFuzzing.Common.Implementation\DotNetFuzzing.Common.Implementation.csproj", "{F8F4E5C9-587B-4277-A3A4-FC0651EBE8A3}"
 EndProject

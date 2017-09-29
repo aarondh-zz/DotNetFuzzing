@@ -108,6 +108,7 @@
   <ItemGroup>
     <Compile Include="FuzzerSettings.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RunResult.cs" />
     <EmbeddedResource Include="Properties\DotNetFuzzing.Common.Implementation.rd.xml" />
   </ItemGroup>
   <ItemGroup>

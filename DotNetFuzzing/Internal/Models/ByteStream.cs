@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace DotNetFuzzing.Internal.Models
+namespace DotNetFuzzing.Fuzzing.Internal.Models
 {
     public class ByteStream : Stream
     {

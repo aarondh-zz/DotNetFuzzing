@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace DotNetFuzzing
+namespace DotNetFuzzing.Fuzzing.Internal.Models
 {
     public class FuzzerStatistics
     {

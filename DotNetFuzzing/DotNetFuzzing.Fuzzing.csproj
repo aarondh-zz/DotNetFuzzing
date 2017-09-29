@@ -7,8 +7,8 @@
     <ProjectGuid>{D6CB99AE-81CE-423E-B366-A0501E68A2E5}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>DotNetFuzzing</RootNamespace>
-    <AssemblyName>DotNetFuzzing</AssemblyName>
+    <RootNamespace>DotNetFuzzing.Fuzzing</RootNamespace>
+    <AssemblyName>DotNetFuzzing.Fuzzing</AssemblyName>
     <DefaultLanguage>en-US</DefaultLanguage>
     <TargetPlatformIdentifier>UAP</TargetPlatformIdentifier>
     <TargetPlatformVersion Condition=" '$(TargetPlatformVersion)' == '' ">10.0.15063.0</TargetPlatformVersion>
@@ -108,7 +108,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Fuzzer.cs" />
-    <Compile Include="FuzzerStatistics.cs" />
+    <Compile Include="Internal\Models\FuzzerStatistics.cs" />
     <Compile Include="Internal\Models\ByteStream.cs" />
     <Compile Include="Internal\Models\EffectorMap.cs" />
     <Compile Include="Internal\Models\ExtraData.cs" />
@@ -116,6 +116,7 @@
     <Compile Include="Internal\Models\Queue.cs" />
     <Compile Include="Internal\Models\TraceBits.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Internal\Models\RunResult.cs" />
     <Compile Include="Utilities\Hasher.cs" />
     <Compile Include="Utilities\StringExtensions.cs" />
     <Compile Include="Utilities\TraceLogger.cs" />

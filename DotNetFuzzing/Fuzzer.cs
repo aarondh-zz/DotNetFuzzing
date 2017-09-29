@@ -1,5 +1,5 @@
 ﻿using DotNetFuzzing.Common;
-using DotNetFuzzing.Internal.Models;
+using DotNetFuzzing.Fuzzing.Internal.Models;
 using DotNetFuzzing.Utilities;
 using Newtonsoft.Json;
 using System;
@@ -8,9 +8,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using static DotNetFuzzing.Internal.Models.Queue;
+using static DotNetFuzzing.Fuzzing.Internal.Models.Queue;
 
-namespace DotNetFuzzing
+namespace DotNetFuzzing.Fuzzing
 {
     public class Fuzzer
     {
@@ -20,7 +20,6 @@ namespace DotNetFuzzing
         /// Top entries for bitmap bytes
         /// </summary>
         private Queue.QueueEntry[] top_rated = new QueueEntry[Constants.MAP_SIZE];
-        private int _queueCycle;
         private int stage_cur, stage_max;      /* Stage progression                */
         private int splicing_with = -1;        /* Splicing with which test case?   */
 
@@ -237,7 +236,7 @@ namespace DotNetFuzzing
             int cyclesWithoutFinds = 0;
             int prev_queued = 0;
             int _queueCount = _queue.Count;
-            bool use_splicing = settings.SkipDeterministic;
+            bool useSplicing = settings.SkipDeterministic;
             int sync_interval_cnt = 0;
 
             while (true)
@@ -263,7 +262,7 @@ namespace DotNetFuzzing
                 ShowStats();
                 if (settings.LogLevel == LogLevel.Verbose)
                 {
-                    settings.Logger.Verbose($"Entering queue cycle {_queueCycle}.");
+                    settings.Logger.Verbose($"Entering queue cycle {queueCycle}.");
                 }
 
                 /* If we had a full queue cycle with no new finds, try
@@ -272,7 +271,7 @@ namespace DotNetFuzzing
                 if (_queue.Count == prev_queued)
                 {
 
-                    if (use_splicing) cyclesWithoutFinds++; else use_splicing = true;
+                    if (useSplicing) cyclesWithoutFinds++; else useSplicing = true;
 
                 }
                 else cyclesWithoutFinds = 0;
@@ -285,7 +284,7 @@ namespace DotNetFuzzing
                 }
 
 
-                skippedFuzz = FuzzOne(queueCurrent, currentEntry, queueCycle, currentEntry);
+                skippedFuzz = FuzzOne(queueCurrent, currentEntry, queueCycle, currentEntry, useSplicing);
 
                 if (StopSoon == StopMode.NotStopping && settings.SyncId != null && !skippedFuzz)
                 {
@@ -357,14 +356,24 @@ namespace DotNetFuzzing
 
 #endif
         }
-
+        private string GetCurrentOutputFilePath()
+        {
+            if ( _settings.OutFile == null )
+            {
+                return $"{_settings.OutputDirectory}/.cur_input";
+            }
+            else
+            {
+                return $"{_settings.OutputDirectory}/{_settings.OutFile}";
+            }
+        }
         private void SetupOutput()
         {
             var outputFileName = $"{_settings.OutputDirectory}/.cur_input";
 
             _settings.FileSystem.DeleteFile(outputFileName); /* Ignore errors */
 
-            _outputStream = _settings.FileSystem.Open(outputFileName, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.ReadWrite);
+            _outputStream = _settings.FileSystem.Open(outputFileName, OpenOptions.Create | OpenOptions.WriteOnly);
         }
         /// <summary>
         ///  Write modified data to file for testing. If out_file is set, the old file
@@ -376,11 +385,13 @@ namespace DotNetFuzzing
         private void WriteToTestCase(byte[] buffer, int length)
         {
 
-            if (_settings.TargetFile != null)
+            if (_settings.OutFile != null)
             {
                 var fileSystem = _settings.FileSystem;
-                fileSystem.DeleteFile(_settings.TargetFile); //ignore errors
-                using (var stream = fileSystem.Open(_settings.TargetFile, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
+                var outFilePath = GetCurrentOutputFilePath();
+
+                fileSystem.DeleteFile(outFilePath); //ignore errors
+                using (var stream = fileSystem.Open(outFilePath, OpenOptions.Create | OpenOptions.Exclusive | OpenOptions.WriteOnly))
                 {
                     stream.Write(buffer, 0, length);
                     stream.Flush();
@@ -446,17 +457,6 @@ namespace DotNetFuzzing
         private int Randomize(int limit)
         {
             return _random.Next(limit);
-        }
-
-        public enum FuzzOutcomes
-        {
-            FAULT_TMOUT,
-            FAULT_ERROR,
-            Success,
-            FAULT_NOINST,
-            FAULT_NOBITS,
-            FAULT_CRASH,
-            FAULT_STOPPING
         }
 
         private int CountBytes(bool[] map)
@@ -576,15 +576,15 @@ namespace DotNetFuzzing
         private int havoc_div = 1;
         private bool auto_changed;
 
-        private bool IsAborting(FuzzOutcomes fault)
+        private bool IsAborting(RunOutcomes fault)
         {
             return StopSoon != StopMode.NotStopping
-                || (_settings.CrashMode && fault != FuzzOutcomes.FAULT_CRASH)
-                || (!_settings.CrashMode && fault != FuzzOutcomes.Success);
+                || (_settings.CrashMode && fault != RunOutcomes.FAULT_CRASH)
+                || (!_settings.CrashMode && fault != RunOutcomes.FAULT_NONE);
         }
-        private RunResult CalibrateCase(QueueEntry q, byte[] use_mem, int handicap, bool from_queue)
+        private IRunResult CalibrateCase(QueueEntry q, byte[] use_mem, int handicap, bool from_queue)
         {
-            RunResult runResult = new RunResult();
+            IRunResult runResult = new RunResult();
             NewBitTypes new_bits = NewBitTypes.NoNewBits;
             bool var_detected = false;
             bool first_run = (q.ExecutionTraceChecksum == 0);
@@ -650,7 +650,7 @@ namespace DotNetFuzzing
 
                 if (!_settings.DumbMode && stage_cur == 0 && _traceBits.CountBytes() > 0)
                 {
-                    runResult.Outcome = FuzzOutcomes.FAULT_NOINST;
+                    runResult = new RunResult(RunOutcomes.FAULT_NOINST);
                     goto abort_calibration;
                 }
 
@@ -720,9 +720,9 @@ namespace DotNetFuzzing
                parent. This is a non-critical problem, but something to warn the user
                about. */
 
-            if (!_settings.DumbMode && first_run && runResult.Outcome == FuzzOutcomes.Success && new_bits == NewBitTypes.NoNewBits)
+            if (!_settings.DumbMode && first_run && runResult.Outcome == RunOutcomes.FAULT_NONE && new_bits == NewBitTypes.NoNewBits)
             {
-                runResult.Outcome = FuzzOutcomes.FAULT_NOBITS;
+                runResult = new RunResult(RunOutcomes.FAULT_NOBITS);
             }
 
             abort_calibration:
@@ -898,13 +898,13 @@ namespace DotNetFuzzing
         /// <param name="q"></param>
         /// <param name="in_buf"></param>
         /// <returns></returns>
-        private FuzzOutcomes TrimCase(QueueEntry q, byte[] in_buf)
+        private RunOutcomes TrimCase(QueueEntry q, byte[] in_buf)
         {
             string tmp = null;
             ByteStream clean_trace = new ByteStream(Constants.MAP_SIZE);
 
             bool needs_write = false;
-            FuzzOutcomes fault = FuzzOutcomes.Success;
+            RunOutcomes fault = RunOutcomes.FAULT_NONE;
             int trim_exec = 0;
             int remove_len;
             int len_p2;
@@ -915,7 +915,7 @@ namespace DotNetFuzzing
 
             if (q.Length < 5)
             {
-                return FuzzOutcomes.Success;
+                return RunOutcomes.FAULT_NONE;
             }
 
             stage_name = tmp;
@@ -953,7 +953,7 @@ namespace DotNetFuzzing
 
                     _stats.TrimExecutions++;
 
-                    if (StopSoon != StopMode.NotStopping || fault == FuzzOutcomes.FAULT_ERROR)
+                    if (StopSoon != StopMode.NotStopping || fault == RunOutcomes.FAULT_ERROR)
                     {
                         goto abort_trimming;
                     }
@@ -1115,15 +1115,15 @@ namespace DotNetFuzzing
         /// <param name="len"></param>
         /// <param name="fault"></param>
         /// <returns></returns>
-        private bool SaveIfInteresting(byte[] mem, int len, RunResult runResult, int currentEntry)
+        private bool SaveIfInteresting(byte[] mem, int len, IRunResult runResult, int currentEntry, int queueCycle)
         {
 
             string filePath;
             bool keeping = false;
             NewBitTypes hnb;
 
-            if ((!_settings.CrashMode && runResult.Outcome == FuzzOutcomes.Success)
-                || (_settings.CrashMode && runResult.Outcome == FuzzOutcomes.FAULT_CRASH))
+            if ((!_settings.CrashMode && runResult.Outcome == RunOutcomes.FAULT_NONE)
+                || (_settings.CrashMode && runResult.Outcome == RunOutcomes.FAULT_CRASH))
             {
 
                 /* Keep only if there are new bits in the map, add to queue for
@@ -1154,9 +1154,9 @@ namespace DotNetFuzzing
                 /* Try to calibrate inline; this also calls update_bitmap_score() when
                    successful. */
 
-                runResult = CalibrateCase(newQueuedEntry, mem, _queueCycle - 1, false);
+                runResult = CalibrateCase(newQueuedEntry, mem, queueCycle - 1, false);
 
-                if (runResult.Outcome == FuzzOutcomes.FAULT_ERROR)
+                if (runResult.Outcome == RunOutcomes.FAULT_ERROR)
                 {
                     _settings.Logger.Fatal("Unable to execute target application");
                     throw new Exception("Unable to execute target application");
@@ -1174,7 +1174,7 @@ namespace DotNetFuzzing
             switch (runResult.Outcome)
             {
 
-                case FuzzOutcomes.FAULT_TMOUT:
+                case RunOutcomes.FAULT_TMOUT:
 
                     /* Timeouts are not very interesting, but we're still obliged to keep
                        a handful of samples. We use the presence of new bits in the
@@ -1210,9 +1210,9 @@ namespace DotNetFuzzing
                            timeout actually uncovers a crash. Make sure we don't discard it if
                            so. */
 
-                        if (StopSoon == StopMode.NotStopping && rerunResult.Outcome == FuzzOutcomes.FAULT_CRASH) goto keep_as_crash;
+                        if (StopSoon == StopMode.NotStopping && rerunResult.Outcome == RunOutcomes.FAULT_CRASH) goto keep_as_crash;
 
-                        if (StopSoon != StopMode.NotStopping || rerunResult.Outcome != FuzzOutcomes.FAULT_TMOUT) return keeping;
+                        if (StopSoon != StopMode.NotStopping || rerunResult.Outcome != RunOutcomes.FAULT_TMOUT) return keeping;
 
                     }
 
@@ -1232,7 +1232,7 @@ namespace DotNetFuzzing
 
                     break;
 
-                case FuzzOutcomes.FAULT_CRASH:
+                case RunOutcomes.FAULT_CRASH:
 
                     keep_as_crash:
 
@@ -1269,7 +1269,7 @@ namespace DotNetFuzzing
 
                     break;
 
-                case FuzzOutcomes.FAULT_ERROR:
+                case RunOutcomes.FAULT_ERROR:
                     _settings.Logger.Fatal("Unable to execute target application");
                     throw new Exception("Unable to execute target application");
                 default:
@@ -1292,7 +1292,6 @@ namespace DotNetFuzzing
 
         private void WriteCrashReadme()
         {
-            throw new NotImplementedException();
         }
 
         /// <summary>
@@ -1304,7 +1303,7 @@ namespace DotNetFuzzing
         /// <param name="out_buf"></param>
         /// <param name="len"></param>
         /// <returns></returns>
-        private bool CommonFuzzStuff(ByteStream out_buf, int length, int currentEntry)
+        private bool CommonFuzzStuff(ByteStream out_buf, int length, int currentEntry, int queueCycle)
         {
 
             byte[] resultingBytes;
@@ -1326,7 +1325,7 @@ namespace DotNetFuzzing
 
             if (StopSoon != StopMode.NotStopping) return true;
 
-            if (runResult.Outcome == FuzzOutcomes.FAULT_TMOUT)
+            if (runResult.Outcome == RunOutcomes.FAULT_TMOUT)
             {
 
                 if (subseq_tmouts++ > Constants.TMOUT_LIMIT)
@@ -1352,7 +1351,7 @@ namespace DotNetFuzzing
 
             /* This handles FAULT_ERROR for us: */
 
-            _queued_discovered += SaveIfInteresting(resultingBytes, length, runResult, currentEntry) ? 1 : 0;
+            _queued_discovered += SaveIfInteresting(resultingBytes, length, runResult, currentEntry, queueCycle) ? 1 : 0;
 
             if ((stage_cur % _settings.StatsUpdateFrequency) == 0 || stage_cur + 1 == stage_max)
                 ShowStats();
@@ -1773,7 +1772,7 @@ namespace DotNetFuzzing
         /// <param name="queueCycle"></param>
         /// <param name="queuedPaths"></param>
         /// <returns></returns>
-        private bool FuzzOne(QueueEntry currentQueue, int currentEntry, int queueCycle, int queuedPaths)
+        private bool FuzzOne(QueueEntry currentQueue, int currentEntry, int queueCycle, int queuedPaths, bool useSplicing)
         {
             bool returnValue = true;
             bool doingDeterministic = false;
@@ -1867,14 +1866,14 @@ namespace DotNetFuzzing
 
             if (currentQueue.CalibrationFailed > 0)
             {
-                RunResult res = new RunResult() { Outcome = FuzzOutcomes.FAULT_TMOUT };
+                IRunResult res = new RunResult(RunOutcomes.FAULT_TMOUT);
 
                 if (currentQueue.CalibrationFailed < Constants.CAL_CHANCES)
                 {
 
                     res = CalibrateCase(currentQueue, in_buf, queueCycle - 1, false);
 
-                    if (res.Outcome == FuzzOutcomes.FAULT_ERROR)
+                    if (res.Outcome == RunOutcomes.FAULT_ERROR)
                     {
                         _settings.Logger.Fatal("Unable to execute target application");
                         throw new Exception("Unable to execute target application");
@@ -1897,9 +1896,9 @@ namespace DotNetFuzzing
             if (!_settings.DumbMode && !currentQueue.TrimDone)
             {
 
-                FuzzOutcomes res = TrimCase(currentQueue, in_buf);
+                RunOutcomes res = TrimCase(currentQueue, in_buf);
 
-                if (res == FuzzOutcomes.FAULT_ERROR)
+                if (res == RunOutcomes.FAULT_ERROR)
                 {
                     _settings.Logger.Fatal("Unable to execute target application");
                     throw new Exception("Unable to execute target application");
@@ -1970,7 +1969,7 @@ namespace DotNetFuzzing
 
                 out_buf.FlipBit(stage_cur);
 
-                if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                 out_buf.FlipBit(stage_cur);
 
@@ -2066,7 +2065,7 @@ namespace DotNetFuzzing
                 out_buf.FlipBit(stage_cur);
                 out_buf.FlipBit(stage_cur + 1);
 
-                if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                 out_buf.FlipBit(stage_cur);
                 out_buf.FlipBit(stage_cur + 1);
@@ -2095,7 +2094,7 @@ namespace DotNetFuzzing
                 out_buf.FlipBit(stage_cur + 2);
                 out_buf.FlipBit(stage_cur + 3);
 
-                if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                 out_buf.FlipBit(stage_cur);
                 out_buf.FlipBit(stage_cur + 1);
@@ -2128,7 +2127,7 @@ namespace DotNetFuzzing
                 out_buf.Seek(stage_cur, SeekOrigin.Begin);
                 out_buf.Xor(0xFF);
 
-                if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                 /* We also use this stage to pull off a simple trick: we identify
                    bytes that seem to have no effect on the current execution path
@@ -2197,7 +2196,7 @@ namespace DotNetFuzzing
                 stage_cur_byte = i;
                 out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFF);
-                if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                 stage_cur++;
                 out_buf.Xor(0xFFFF);
 
@@ -2232,7 +2231,7 @@ namespace DotNetFuzzing
                 out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFFFFFF);
 
-                if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                 stage_cur++;
 
                 out_buf.Seek(i, SeekOrigin.Begin);
@@ -2290,7 +2289,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((byte)(orig + j), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2303,7 +2302,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((byte)(orig - j), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2365,7 +2364,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt16)(orig + j), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2376,7 +2375,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt16)(orig - j), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2392,7 +2391,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP16((UInt16)(SWAP16(orig) + j)), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2403,7 +2402,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP16((UInt16)(SWAP16(orig) - j)), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2463,7 +2462,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt32)(orig + j), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2474,7 +2473,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt32)(orig - j), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2489,7 +2488,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP32((UInt32)(SWAP32(orig) + j)), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2500,7 +2499,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP32((UInt32)(SWAP32(orig) - j)), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2562,7 +2561,7 @@ namespace DotNetFuzzing
                     out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.WriteByte(Constants.INTERESTING_8[j]);
 
-                    if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                    if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                     out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.WriteByte(orig);
@@ -2618,7 +2617,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt16)Constants.INTERESTING_16[j], 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2633,7 +2632,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP16((UInt16)Constants.INTERESTING_16[j]), 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2691,7 +2690,7 @@ namespace DotNetFuzzing
                         out_buf.Seek(0L, SeekOrigin.Begin);
                         out_buf.Write((UInt32)Constants.INTERESTING_32[j], 1);
 
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2705,7 +2704,7 @@ namespace DotNetFuzzing
 
                         out_buf.Seek(0L, SeekOrigin.Begin);
                         out_buf.Write(SWAP32((UInt32)Constants.INTERESTING_32[j]), 1);
-                        if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                        if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
                         stage_cur++;
 
                     } else stage_max--;
@@ -2773,7 +2772,7 @@ namespace DotNetFuzzing
                     out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.Write(in_buf, 0, _extras[j].Length);
 
-                    if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                    if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                     stage_cur++;
 
@@ -2818,7 +2817,7 @@ namespace DotNetFuzzing
                     /* Copy tail */
                     ex_tmp.WriteBytes(out_buf, i, length - i);
 
-                    if (CommonFuzzStuff(ex_tmp, length + _extras[j].Length, currentEntry)) {
+                    if (CommonFuzzStuff(ex_tmp, length + _extras[j].Length, currentEntry, queueCycle)) {
                         ex_tmp.Dispose();
                         goto abandon_entry;
                     }
@@ -2879,7 +2878,7 @@ namespace DotNetFuzzing
                     out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.Write(_autoExtras[j].Data, 0, last_len);
 
-                    if (CommonFuzzStuff(out_buf, length, currentEntry)) goto abandon_entry;
+                    if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
 
                     stage_cur++;
 
@@ -3128,7 +3127,7 @@ namespace DotNetFuzzing
 
                                 /* Don't delete too much. */
 
-                                del_len = choose_block_len(temp_len - 1, _queueCycle);
+                                del_len = choose_block_len(temp_len - 1, queueCycle);
 
                                 del_from = Randomize(temp_len - del_len + 1);
                                 out_buf.Seek(del_from, SeekOrigin.Begin);
@@ -3151,12 +3150,12 @@ namespace DotNetFuzzing
 
                                 if (actually_clone) {
 
-                                    clone_len = choose_block_len(temp_len, _queueCycle);
+                                    clone_len = choose_block_len(temp_len, queueCycle);
                                     clone_from = Randomize(temp_len - clone_len + 1);
 
                                 } else {
 
-                                    clone_len = choose_block_len(Constants.HAVOC_BLK_XL, _queueCycle);
+                                    clone_len = choose_block_len(Constants.HAVOC_BLK_XL, queueCycle);
                                     clone_from = 0;
 
                                 }
@@ -3205,7 +3204,7 @@ namespace DotNetFuzzing
 
                                 if (temp_len < 2) break;
 
-                                copy_len = choose_block_len(temp_len - 1, _queueCycle);
+                                copy_len = choose_block_len(temp_len - 1, queueCycle);
 
                                 copy_from = Randomize(temp_len - copy_len + 1);
                                 copy_to = Randomize(temp_len - copy_len + 1);
@@ -3332,7 +3331,7 @@ namespace DotNetFuzzing
 
                 }
 
-                if (CommonFuzzStuff(out_buf, temp_len, currentEntry))
+                if (CommonFuzzStuff(out_buf, temp_len, currentEntry, queueCycle))
                     goto abandon_entry;
 
                 /* out_buf might have been mangled a bit, so let's restore it to its
@@ -3382,7 +3381,7 @@ namespace DotNetFuzzing
 
                 retry_splicing:
 
-                if (_settings.UseSplicing && splice_cycle++ < Constants.SPLICE_CYCLES &&
+                if (useSplicing && splice_cycle++ < Constants.SPLICE_CYCLES &&
                     _queue.Count > 1 && currentQueue.Length > 1) {
 
                     int split_at;
@@ -3698,7 +3697,7 @@ namespace DotNetFuzzing
             while (q != null) {
 
                 byte[] use_mem;
-                RunResult res;
+                IRunResult res;
 
                 var fileName = Path.GetFileName(q.FilePath);
 
@@ -3719,14 +3718,14 @@ namespace DotNetFuzzing
                     return;
                 }
 
-                if ((_settings.CrashMode && res.Outcome == FuzzOutcomes.FAULT_CRASH) || (!_settings.CrashMode && res.Outcome == FuzzOutcomes.Success) || res.Outcome == FuzzOutcomes.FAULT_NOBITS)
+                if ((_settings.CrashMode && res.Outcome == RunOutcomes.FAULT_CRASH) || (!_settings.CrashMode && res.Outcome == RunOutcomes.FAULT_NONE) || res.Outcome == RunOutcomes.FAULT_NOBITS)
                 {
                     _settings.Logger.Information($"len = {q.Length}, map size = {q.BitmapSize}, exec speed = {q.ExecutionTimeUs} us'");
                 }
 
                 switch (res.Outcome) {
 
-                    case FuzzOutcomes.Success:
+                    case RunOutcomes.FAULT_NONE:
 
                         if (q == _queue.First)
                         {
@@ -3741,7 +3740,7 @@ namespace DotNetFuzzing
 
                         break;
 
-                    case FuzzOutcomes.FAULT_TMOUT:
+                    case RunOutcomes.FAULT_TMOUT:
 
                         if (_timeoutType != TimeOutTypes.NotSpecified) {
 
@@ -3778,7 +3777,7 @@ namespace DotNetFuzzing
 
                         }
                         break;
-                    case FuzzOutcomes.FAULT_CRASH:
+                    case RunOutcomes.FAULT_CRASH:
 
                         if (_settings.CrashMode) break;
 
@@ -3823,17 +3822,17 @@ namespace DotNetFuzzing
 
                         _settings.Logger.Fatal($"Test case '{fileName}' results in a crash");
                         break;
-                    case FuzzOutcomes.FAULT_ERROR:
+                    case RunOutcomes.FAULT_ERROR:
 
                         _settings.Logger.Fatal($"Unable to execute target application ('%s')");
                         break;
 
-                    case FuzzOutcomes.FAULT_NOINST:
+                    case RunOutcomes.FAULT_NOINST:
 
                         _settings.Logger.Fatal("No instrumentation detected");
                         break;
 
-                    case FuzzOutcomes.FAULT_NOBITS:
+                    case RunOutcomes.FAULT_NOBITS:
 
                         _uselessTestCasesAtStart++;
 
@@ -4140,22 +4139,35 @@ namespace DotNetFuzzing
 
 
         }
-        private class RunResult
+        private IRunResult RunTarget( int timeout )
         {
-            public FuzzOutcomes Outcome { get; set; }
-            public int Reason { get; set; }
-
-            public override string ToString()
+            Task<IRunResult> task;
+            try
             {
-                return $"Outcome = {Outcome}, Reason = {Reason}";
+                _stats.total_executions++;
+                _traceBits.Seek(0L, SeekOrigin.Begin);
+                _traceBits.Write(0, (int)_traceBits.Length);
+                var testCaseFilePath = GetCurrentOutputFilePath();
+                task = _settings.TargetInitiator.RunTarget(_settings, testCaseFilePath, _traceBits.GetBytes());
+                task.Wait(timeout);
+                if ( task.IsCompleted )
+                {
+                    return task.Result;
+                }
+                else if (task.IsCanceled)
+                {
+                    return new RunResult(RunOutcomes.FAULT_TMOUT);
+                }
+                else if (task.IsFaulted)
+                {
+                    return new RunResult(RunOutcomes.FAULT_ERROR);
+                }
+                return new RunResult(RunOutcomes.FAULT_ERROR);
             }
-        }
-        private RunResult RunTarget( int timeout )
-        {
-             _stats.total_executions++;
-            _traceBits.Seek(0L, SeekOrigin.Begin);
-            _traceBits.Write(0, (int)_traceBits.Length);
-            return new RunResult { Outcome = FuzzOutcomes.Success, Reason = 404 };
+            catch (Exception e)
+            {
+                return new RunResult(RunOutcomes.FAULT_ERROR, exception: e);
+            }
         }
         private bool DeleteFiles(string directoryPath, string prefix = null)
         {

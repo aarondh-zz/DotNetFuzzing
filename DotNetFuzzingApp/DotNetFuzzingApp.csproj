@@ -132,9 +132,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\DotNetFuzzing\DotNetFuzzing.Fuzzer.csproj">
+    <ProjectReference Include="..\DotNetFuzzing\DotNetFuzzing.Fuzzing.csproj">
       <Project>{d6cb99ae-81ce-423e-b366-a0501e68a2e5}</Project>
-      <Name>DotNetFuzzing.Fuzzer</Name>
+      <Name>DotNetFuzzing.Fuzzing</Name>
     </ProjectReference>
   </ItemGroup>
   <PropertyGroup Condition=" '$(VisualStudioVersion)' == '' or '$(VisualStudioVersion)' &lt; '14.0' ">

@@ -112,10 +112,13 @@
     <Compile Include="IFileSystem.cs" />
     <Compile Include="IFuzzerSettings.cs" />
     <Compile Include="ILogger.cs" />
+    <Compile Include="IRunResult.cs" />
     <Compile Include="IStream.cs" />
+    <Compile Include="ITargetInitiator.cs" />
     <Compile Include="LogLevel.cs" />
     <Compile Include="PostHandler.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RunOutcomes.cs" />
     <EmbeddedResource Include="Properties\DotNetFuzzing.Common.rd.xml" />
   </ItemGroup>
   <ItemGroup>

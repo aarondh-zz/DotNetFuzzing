@@ -87,6 +87,8 @@ namespace DotNetFuzzing.Common.Implementation
 
         public IFileSystem FileSystem{ get; set; }
 
+        public ITargetInitiator TargetInitiator { get; set; }
+
         public long MaxFileSize{ get; set; }
 
         public LogLevel LogLevel{ get; set; }
