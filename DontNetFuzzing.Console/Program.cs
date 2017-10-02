@@ -9,11 +9,13 @@ namespace DontNetFuzzing.Console
     {
         static void Main(string[] args)
         {
+            ILogger logger = new ConsoleLogger();
             var settings = new FuzzerSettings
             {
-                Logger = new ConsoleLogger(),
+                Logger = logger,
                 FileSystem = new FileSystem(),
                 TargetInitiator = new TestTargetInitiator(),
+                ProgressMonitor = new ProgressMonitor(logger),
                 LogLevel = LogLevel.Verbose,
                 InputDirectory = "./examples/example1",
                 OutputDirectory = "./output/example1",

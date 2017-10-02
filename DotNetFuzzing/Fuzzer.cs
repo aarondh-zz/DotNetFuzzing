@@ -25,12 +25,11 @@ namespace DotNetFuzzing.Fuzzing
 
         private uint master_id, master_max;     /* Master instance job splitting    */
 
-        private long stage_cur_byte;            /* Byte offset of current stage op  */
-        private int stage_cur_val;
         private int _currentSkippedPaths;
         private ILogger _logger;
         private IFuzzerSettings _settings;
         private FuzzerStatistics _stats;
+        private FuzzerProgress _progress;
         private int _lastPathTime;
         private int _queuedAtStart;
         private Random _random;
@@ -47,10 +46,7 @@ namespace DotNetFuzzing.Fuzzing
         /// Execs per fuzz stage 
         /// </summary>
         private Int64[] stage_cycles = new Int64[(int)FuzzingStages.TotalStages];
-        private string stage_name;
         private StageValueTypes stage_val_type;
-
-        public string stage_short { get; private set; }
 
         public List<ExtraData> _extras = new List<ExtraData>();
         public List<ExtraData> _autoExtras = new List<ExtraData>();
@@ -127,6 +123,7 @@ namespace DotNetFuzzing.Fuzzing
         {
             _random = new Random();
             _stats = new FuzzerStatistics();
+            _progress = new FuzzerProgress();
             var_bytes = new bool[Constants.MAP_SIZE];
         }
         public void Fuzz(IFuzzerSettings settings)
@@ -231,11 +228,11 @@ namespace DotNetFuzzing.Fuzzing
             SaveAuto();
 
             QueueEntry queueCurrent = null;
-            int currentEntry = 0;
-            int queueCycle = 0;
+            _progress.QueueIndex = 0;
+            _progress.QueueCycle = 0;
+            _progress.QueueSize = _queue.Count;
             int cyclesWithoutFinds = 0;
             int prev_queued = 0;
-            int _queueCount = _queue.Count;
             bool useSplicing = settings.SkipDeterministic;
             int sync_interval_cnt = 0;
 
@@ -247,14 +244,15 @@ namespace DotNetFuzzing.Fuzzing
 
                 if (queueCurrent == null)
                 {
-                    queueCycle++;
-                    currentEntry = 0;
+                    _progress.QueueCycle++;
+                    _progress.QueueIndex = 0;
+                    _progress.QueueSize = _queue.Count;
                     _currentSkippedPaths = 0;
                     queueCurrent = _queue.First;
                 }
                 while (seekTo != 0)
                 {
-                    currentEntry++;
+                    _progress.QueueIndex++;
                     seekTo--;
                     queueCurrent = queueCurrent.Next;
                 }
@@ -262,7 +260,7 @@ namespace DotNetFuzzing.Fuzzing
                 ShowStats();
                 if (settings.LogLevel == LogLevel.Verbose)
                 {
-                    settings.Logger.Verbose($"Entering queue cycle {queueCycle}.");
+                    settings.Logger.Verbose($"Entering queue cycle {_progress.QueueCycle}.");
                 }
 
                 /* If we had a full queue cycle with no new finds, try
@@ -278,13 +276,13 @@ namespace DotNetFuzzing.Fuzzing
 
                 prev_queued = _queue.Count;
 
-                if (settings.SyncId != null && queueCycle == 1 && settings.ImportFirst)
+                if (settings.SyncId != null && _progress.QueueCycle == 1 && settings.ImportFirst)
                 {
                     SyncFuzzers(useArugments);
                 }
 
 
-                skippedFuzz = FuzzOne(queueCurrent, currentEntry, queueCycle, currentEntry, useSplicing);
+                skippedFuzz = FuzzOne(queueCurrent, _progress.QueueIndex, _progress.QueueCycle, _queue.Count, useSplicing);
 
                 if (StopSoon == StopMode.NotStopping && settings.SyncId != null && !skippedFuzz)
                 {
@@ -304,7 +302,7 @@ namespace DotNetFuzzing.Fuzzing
                 if (StopSoon != StopMode.NotStopping) break;
 
                 queueCurrent = queueCurrent.Next;
-                currentEntry++;
+                _progress.QueueIndex++;
             }
 
         }
@@ -595,7 +593,7 @@ namespace DotNetFuzzing.Fuzzing
             int old_sc = stage_cur;
             int old_sm = stage_max;
             int userTimeout = _executionTimeout;
-            string old_sn = stage_name;
+            string old_sn = _progress.StageName;
 
             /* Be a bit more generous about timeouts when resuming sessions, or when
                trying to calibrate already-added finds. This helps avoid trouble due
@@ -609,7 +607,7 @@ namespace DotNetFuzzing.Fuzzing
 
             q.CalibrationFailed++;
 
-            stage_name = "calibration";
+            _progress.StageName = "calibration";
             stage_max = _settings.FastCal ? 3 : Constants.CAL_CYCLES;
 
             /* Make sure the forkserver is up before we do anything, and let's not
@@ -745,7 +743,7 @@ namespace DotNetFuzzing.Fuzzing
 
             }
 
-            stage_name = old_sn;
+            _progress.StageName = old_sn;
             stage_cur = old_sc;
             stage_max = old_sm;
 
@@ -918,7 +916,7 @@ namespace DotNetFuzzing.Fuzzing
                 return RunOutcomes.FAULT_NONE;
             }
 
-            stage_name = tmp;
+            _progress.StageName = tmp;
             _bytes_trim_in += q.Length;
 
             /* Select initial chunk len, starting with large steps. */
@@ -1057,28 +1055,28 @@ namespace DotNetFuzzing.Fuzzing
             }
             else
             {
-                ret = $"src:{currentEntry}";
+                ret = $"src={currentEntry}";
 
                 if (splicing_with >= 0)
                     ret += $"+{splicing_with}";
 
-                ret += $",op={stage_short}";
+                ret += $",op={_progress.StageShortName}";
 
-                if (stage_cur_byte >= 0)
+                if (_progress.CurrentStageByte >= 0)
                 {
 
-                    ret += $",pos={stage_cur_byte}";
+                    ret += $",pos={_progress.CurrentStageByte}";
 
                     if (stage_val_type != StageValueTypes.STAGE_VAL_NONE)
                     {
-                        var stageValueName = (stage_val_type == StageValueTypes.STAGE_VAL_BE) ? "be:" : "";
-                        ret += $",val={stageValueName}+d{stage_cur_val}";
+                        var stageValueName = (stage_val_type == StageValueTypes.STAGE_VAL_BE) ? "be" : "";
+                        ret += $",val={stageValueName}+d{_progress.CurrentStageValue}";
                     }
 
                 }
                 else
                 {
-                    ret += $",rep={stage_cur_val}";
+                    ret += $",rep={_progress.CurrentStageValue}";
                 }
 
             }
@@ -1218,11 +1216,11 @@ namespace DotNetFuzzing.Fuzzing
 
                     if (_settings.SimpleFiles)
                     {
-                        filePath = $"{_settings.OutputDirectory}/hangs/id:{_stats.unique_hangs},{DescribeOperation(NewBitTypes.NoNewBits, currentEntry)}";
+                        filePath = $"{_settings.OutputDirectory}/hangs/id={_stats.unique_hangs}";
                     }
                     else
                     {
-                        filePath = $"{_settings.OutputDirectory}/hangs/id:{_stats.unique_hangs}";
+                        filePath = $"{_settings.OutputDirectory}/hangs/id={_stats.unique_hangs},{DescribeOperation(NewBitTypes.NoNewBits, currentEntry)}";
                     }
 
 
@@ -1255,11 +1253,11 @@ namespace DotNetFuzzing.Fuzzing
                     if (_stats.unique_crashes == 0) WriteCrashReadme();
 
                     if (_settings.SimpleFiles) {
-                        filePath = $"{_settings.OutputDirectory}/crashes/id:{_stats.unique_crashes},{runResult.Reason},{DescribeOperation(NewBitTypes.NoNewBits, currentEntry)}";
+                        filePath = $"{_settings.OutputDirectory}/crashes/id_{_stats.unique_crashes}_{runResult.Reason}";
                     }
                     else
                     {
-                        filePath = $"{_settings.OutputDirectory}/crashes/id_{_stats.unique_crashes}_{runResult.Reason}";
+                        filePath = $"{_settings.OutputDirectory}/crashes/id={_stats.unique_crashes},{runResult.Reason},{DescribeOperation(NewBitTypes.NoNewBits, currentEntry)}";
                     }
 
                     _stats.unique_crashes++;
@@ -1952,12 +1950,12 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Single walking bit. */
 
-            stage_short = "flip1";
+            _progress.StageShortName = "flip1";
             stage_max = length << 3;
-            stage_name = "bitflip 1/1";
+            _progress.StageName = "bitflip 1/1";
 
             stage_val_type = StageValueTypes.STAGE_VAL_NONE;
-            int stage_cur_byte = -1;
+            _progress.CurrentStageByte = -1;
 
             orig_hit_cnt = _queue.Count + _stats.unique_crashes;
 
@@ -1965,7 +1963,7 @@ namespace DotNetFuzzing.Fuzzing
 
             for (int stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
-                stage_cur_byte = (int)(stage_cur >> 3);
+                _progress.CurrentStageByte = (int)(stage_cur >> 3);
 
                 out_buf.FlipBit(stage_cur);
 
@@ -2052,15 +2050,15 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Two walking bits. */
 
-            stage_name = "bitflip 2/1";
-            stage_short = "flip2";
+            _progress.StageName = "bitflip 2/1";
+            _progress.StageShortName = "flip2";
             stage_max = (length << 3) - 1;
 
             orig_hit_cnt = new_hit_cnt;
 
             for (int stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
-                stage_cur_byte = stage_cur >> 3;
+                _progress.CurrentStageByte = stage_cur >> 3;
 
                 out_buf.FlipBit(stage_cur);
                 out_buf.FlipBit(stage_cur + 1);
@@ -2079,15 +2077,15 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Four walking bits. */
 
-            stage_name = "bitflip 4/1";
-            stage_short = "flip4";
+            _progress.StageName = "bitflip 4/1";
+            _progress.StageShortName = "flip4";
             stage_max = (length << 3) - 3;
 
             orig_hit_cnt = new_hit_cnt;
 
             for (int stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
-                stage_cur_byte = stage_cur >> 3;
+                _progress.CurrentStageByte = stage_cur >> 3;
 
                 out_buf.FlipBit(stage_cur);
                 out_buf.FlipBit(stage_cur + 1);
@@ -2115,15 +2113,15 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Walking byte. */
 
-            stage_name = "bitflip 8/8";
-            stage_short = "flip8";
+            _progress.StageName = "bitflip 8/8";
+            _progress.StageShortName = "flip8";
             stage_max = length;
 
             orig_hit_cnt = new_hit_cnt;
 
             for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
-                stage_cur_byte = stage_cur;
+                _progress.CurrentStageByte = stage_cur;
                 out_buf.Seek(stage_cur, SeekOrigin.Begin);
                 out_buf.Xor(0xFF);
 
@@ -2178,8 +2176,8 @@ namespace DotNetFuzzing.Fuzzing
 
             if (length < 2) goto skip_bitflip;
 
-            stage_name = "bitflip 16/8";
-            stage_short = "flip16";
+            _progress.StageName = "bitflip 16/8";
+            _progress.StageShortName = "flip16";
             stage_cur = 0;
             stage_max = length - 1;
 
@@ -2193,7 +2191,7 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
                 out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFF);
                 if (CommonFuzzStuff(out_buf, length, currentEntry, queueCycle)) goto abandon_entry;
@@ -2211,8 +2209,8 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Four walking bytes. */
 
-            stage_name = "bitflip 32/8";
-            stage_short = "flip32";
+            _progress.StageName = "bitflip 32/8";
+            _progress.StageShortName = "flip32";
             stage_cur = 0;
             stage_max = length - 3;
 
@@ -2227,7 +2225,7 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
                 out_buf.Seek(i, SeekOrigin.Begin);
                 out_buf.Xor(0xFFFFFFFF);
 
@@ -2254,8 +2252,8 @@ namespace DotNetFuzzing.Fuzzing
 
             /* 8-bit arithmetics. */
 
-            stage_name = "arith 8/8";
-            stage_short = "arith8";
+            _progress.StageName = "arith 8/8";
+            _progress.StageShortName = "arith8";
             stage_cur = 0;
             stage_max = 2 * length * Constants.ARITH_MAX;
 
@@ -2274,7 +2272,7 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (int j = 1; j <= Constants.ARITH_MAX; j++) {
 
@@ -2285,7 +2283,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if (!could_be_bitflip(r)) {
 
-                        stage_cur_val = j;
+                        _progress.CurrentStageValue = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((byte)(orig + j), 1);
 
@@ -2298,7 +2296,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if (!could_be_bitflip(r)) {
 
-                        stage_cur_val = -j;
+                        _progress.CurrentStageValue = -j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((byte)(orig - j), 1);
 
@@ -2323,8 +2321,8 @@ namespace DotNetFuzzing.Fuzzing
 
             if (length < 2) goto skip_arith;
 
-            stage_name = "arith 16/8";
-            stage_short = "arith16";
+            _progress.StageName = "arith 16/8";
+            _progress.StageShortName = "arith16";
             stage_cur = 0;
             stage_max = 4 * (length - 1) * Constants.ARITH_MAX;
 
@@ -2342,7 +2340,7 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (int j = 1; j <= Constants.ARITH_MAX; j++) {
 
@@ -2360,7 +2358,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((orig & 0xff) + j > 0xff && !could_be_bitflip(r1)) {
 
-                        stage_cur_val = j;
+                        _progress.CurrentStageValue = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt16)(orig + j), 1);
 
@@ -2371,7 +2369,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((orig & 0xff) < j && !could_be_bitflip(r2)) {
 
-                        stage_cur_val = -j;
+                        _progress.CurrentStageValue = -j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt16)(orig - j), 1);
 
@@ -2387,7 +2385,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((orig >> 8) + j > 0xff && !could_be_bitflip(r3)) {
 
-                        stage_cur_val = j;
+                        _progress.CurrentStageValue = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP16((UInt16)(SWAP16(orig) + j)), 1);
 
@@ -2398,7 +2396,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((orig >> 8) < j && !could_be_bitflip(r4)) {
 
-                        stage_cur_val = -j;
+                        _progress.CurrentStageValue = -j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP16((UInt16)(SWAP16(orig) - j)), 1);
 
@@ -2423,8 +2421,8 @@ namespace DotNetFuzzing.Fuzzing
 
             if (length < 4) goto skip_arith;
 
-            stage_name = "arith 32/8";
-            stage_short = "arith32";
+            _progress.StageName = "arith 32/8";
+            _progress.StageShortName = "arith32";
             stage_cur = 0;
             stage_max = 4 * (length - 3) * Constants.ARITH_MAX;
 
@@ -2442,7 +2440,7 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (var j = 1; j <= Constants.ARITH_MAX; j++) {
 
@@ -2458,7 +2456,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((orig & 0xffff) + j > 0xffff && !could_be_bitflip(r1)) {
 
-                        stage_cur_val = j;
+                        _progress.CurrentStageValue = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt32)(orig + j), 1);
 
@@ -2469,7 +2467,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((orig & 0xffff) < j && !could_be_bitflip(r2)) {
 
-                        stage_cur_val = -j;
+                        _progress.CurrentStageValue = -j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write((UInt32)(orig - j), 1);
 
@@ -2484,7 +2482,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((SWAP32(orig) & 0xffff) + j > 0xffff && !could_be_bitflip(r3)) {
 
-                        stage_cur_val = j;
+                        _progress.CurrentStageValue = j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP32((UInt32)(SWAP32(orig) + j)), 1);
 
@@ -2495,7 +2493,7 @@ namespace DotNetFuzzing.Fuzzing
 
                     if ((SWAP32(orig) & 0xffff) < j && !could_be_bitflip(r4)) {
 
-                        stage_cur_val = -j;
+                        _progress.CurrentStageValue = -j;
                         out_buf.Seek(i, SeekOrigin.Begin);
                         out_buf.Write(SWAP32((UInt32)(SWAP32(orig) - j)), 1);
 
@@ -2522,8 +2520,8 @@ namespace DotNetFuzzing.Fuzzing
              * INTERESTING VALUES *
              **********************/
 
-            stage_name = "interest 8/8";
-            stage_short = "int8";
+            _progress.StageName = "interest 8/8";
+            _progress.StageShortName = "int8";
             stage_cur = 0;
             stage_max = length * Constants.INTERESTING_8.Length;
 
@@ -2545,7 +2543,7 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (var j = 0; j < Constants.INTERESTING_8.Length; j++) {
 
@@ -2557,7 +2555,7 @@ namespace DotNetFuzzing.Fuzzing
                         continue;
                     }
 
-                    stage_cur_val = Constants.INTERESTING_8[j];
+                    _progress.CurrentStageValue = Constants.INTERESTING_8[j];
                     out_buf.Seek(i, SeekOrigin.Begin);
                     out_buf.WriteByte(Constants.INTERESTING_8[j]);
 
@@ -2580,8 +2578,8 @@ namespace DotNetFuzzing.Fuzzing
 
             if (_settings.NoArithmatic || length < 2) goto skip_interest;
 
-            stage_name = "interest 16/8";
-            stage_short = "int16";
+            _progress.StageName = "interest 16/8";
+            _progress.StageShortName = "int16";
             stage_cur = 0;
             stage_max = 2 * (length - 1) * (Constants.INTERESTING_16.Length);
 
@@ -2599,11 +2597,11 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (int j = 0; j < Constants.INTERESTING_16.Length; j++) {
 
-                    stage_cur_val = Constants.INTERESTING_16[j];
+                    _progress.CurrentStageValue = Constants.INTERESTING_16[j];
 
                     /* Skip if this could be a product of a bitflip, arithmetics,
                        or single-byte interesting value insertion. */
@@ -2652,8 +2650,8 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Setting 32-bit integers, both endians. */
 
-            stage_name = "interest 32/8";
-            stage_short = "int32";
+            _progress.StageName = "interest 32/8";
+            _progress.StageShortName = "int32";
             stage_cur = 0;
             stage_max = 2 * (length - 3) * (Constants.INTERESTING_32.Length);
 
@@ -2672,11 +2670,11 @@ namespace DotNetFuzzing.Fuzzing
                     continue;
                 }
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (int j = 0; j < Constants.INTERESTING_32.Length; j++) {
 
-                    stage_cur_val = Constants.INTERESTING_32[j];
+                    _progress.CurrentStageValue = Constants.INTERESTING_32[j];
 
                     /* Skip if this could be a product of a bitflip, arithmetics,
                        or word interesting value insertion. */
@@ -2731,8 +2729,8 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Overwrite with user-supplied extras. */
 
-            stage_name = "user extras (over)";
-            stage_short = "ext_UO";
+            _progress.StageName = "user extras (over)";
+            _progress.StageShortName = "ext_UO";
             stage_cur = 0;
             stage_max = this._extras.Count * length;
 
@@ -2744,7 +2742,7 @@ namespace DotNetFuzzing.Fuzzing
 
                 int last_len = 0;
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 /* Extras are sorted by size, from smallest to largest. This means
                    that we don't have to worry about restoring the buffer in
@@ -2791,8 +2789,8 @@ namespace DotNetFuzzing.Fuzzing
 
             /* Insertion of user-supplied extras. */
 
-            stage_name = "user extras (insert)";
-            stage_short = "ext_UI";
+            _progress.StageName = "user extras (insert)";
+            _progress.StageShortName = "ext_UI";
             stage_cur = 0;
             stage_max = this._extras.Count * length;
 
@@ -2802,7 +2800,7 @@ namespace DotNetFuzzing.Fuzzing
 
             for (int i = 0; i <= length; i++) {
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
                 for (int j = 0; j < this._extras.Count; j++) {
 
                     if (length + _extras[j].Length > Constants.MAX_FILE) {
@@ -2846,8 +2844,8 @@ namespace DotNetFuzzing.Fuzzing
 
             if (_autoExtras.Count == 0) goto skip_extras;
 
-            stage_name = "auto extras (over)";
-            stage_short = "ext_AO";
+            _progress.StageName = "auto extras (over)";
+            _progress.StageShortName = "ext_AO";
             stage_cur = 0;
             stage_max = Math.Min(_autoExtras.Count, Constants.USE_AUTO_EXTRAS) * length;
 
@@ -2859,7 +2857,7 @@ namespace DotNetFuzzing.Fuzzing
 
                 int last_len = 0;
 
-                stage_cur_byte = i;
+                _progress.CurrentStageByte = i;
 
                 for (int j = 0; j < Math.Min(_autoExtras.Count, Constants.USE_AUTO_EXTRAS); j++) {
 
@@ -2914,8 +2912,8 @@ namespace DotNetFuzzing.Fuzzing
 
             if (splice_cycle == 0) {
 
-                stage_name = "havoc";
-                stage_short = "havoc";
+                _progress.StageName = "havoc";
+                _progress.StageShortName = "havoc";
                 stage_max = (doingDeterministic ? Constants.HAVOC_CYCLES_INIT : Constants.HAVOC_CYCLES) *
                               perf_score / havoc_div / 100;
 
@@ -2923,8 +2921,8 @@ namespace DotNetFuzzing.Fuzzing
 
                 perf_score = orig_perf;
 
-                stage_name = $"splace {splice_cycle}";
-                stage_short = "splice";
+                _progress.StageName = $"splace {splice_cycle}";
+                _progress.StageShortName = "splice";
                 stage_max = Constants.SPLICE_HAVOC * perf_score / havoc_div / 100;
 
             }
@@ -2945,11 +2943,11 @@ namespace DotNetFuzzing.Fuzzing
 
                 int use_stacking = 1 << (1 + Randomize(Constants.HAVOC_STACK_POW2));
 
-                var stage_cur_val = use_stacking;
+                _progress.CurrentStageValue = use_stacking;
 
                 for (var i = 0; i < use_stacking; i++) {
                     int havocOperation = Randomize(15 + ((_extras.Count + _autoExtras.Count) > 0 ? 2 : 0));
-                    _settings.Logger.Verbose("current stage: {currentStage} havoc operation: {havocOperation}", stage_cur, havocOperation);
+                    //_settings.Logger.Verbose("current stage: {currentStage} havoc operation: {havocOperation}", stage_cur, havocOperation);
                     switch (havocOperation) {
 
                         case 0:
@@ -3513,7 +3511,11 @@ namespace DotNetFuzzing.Fuzzing
         private void ShowStats()
         {
             var logger = _settings.Logger;
-            logger.Information($"Current stage: {stage_name}");
+            _progress.QueueSize = _queue.Count;
+            if (_settings.ProgressMonitor != null)
+            {
+                _settings.ProgressMonitor.ReportProgress(_progress);
+            }
         }
 
         private void SaveAuto()
@@ -4146,7 +4148,7 @@ namespace DotNetFuzzing.Fuzzing
             {
                 _stats.total_executions++;
                 _traceBits.Seek(0L, SeekOrigin.Begin);
-                _traceBits.Write(0, (int)_traceBits.Length);
+                _traceBits.Write(0, Constants.MAP_SIZE);
                 var testCaseFilePath = GetCurrentOutputFilePath();
                 task = _settings.TargetInitiator.RunTarget(_settings, testCaseFilePath, _traceBits.GetBytes());
                 task.Wait(timeout);

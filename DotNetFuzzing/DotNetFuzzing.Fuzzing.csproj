@@ -113,6 +113,7 @@
     <Compile Include="Internal\Models\EffectorMap.cs" />
     <Compile Include="Internal\Models\ExtraData.cs" />
     <Compile Include="Internal\Models\NewBitTypes.cs" />
+    <Compile Include="Internal\Models\FuzzerProgress.cs" />
     <Compile Include="Internal\Models\Queue.cs" />
     <Compile Include="Internal\Models\TraceBits.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

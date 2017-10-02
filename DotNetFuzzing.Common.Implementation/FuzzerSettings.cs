@@ -88,6 +88,7 @@ namespace DotNetFuzzing.Common.Implementation
         public IFileSystem FileSystem{ get; set; }
 
         public ITargetInitiator TargetInitiator { get; set; }
+        public IProgressMonitor ProgressMonitor { get; set; }
 
         public long MaxFileSize{ get; set; }
 
