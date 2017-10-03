@@ -19,6 +19,9 @@ namespace DotNetFuzzing.Fuzzing.Internal.Models
 
         public string StageShortName { get; set; }
 
+        public int StageCurrent { get; set; }
+        public int StageMax { get; set; }
+
         public int CurrentStageByte { get; set; }
 
         public int CurrentStageValue { get; set; }

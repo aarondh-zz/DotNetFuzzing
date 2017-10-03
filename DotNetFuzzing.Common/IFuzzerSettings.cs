@@ -86,6 +86,7 @@ namespace DotNetFuzzing.Common
         bool SimpleFiles { get; }
 
         ITargetInitiator TargetInitiator { get; }
-        IProgressMonitor ProgressMonitor { get; }
+        IProgressListener ProgressListener { get; }
+        IStatisticsListener StatisticsListener { get; }
     }
 }

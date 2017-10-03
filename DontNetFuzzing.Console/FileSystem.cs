@@ -139,6 +139,15 @@ namespace DontNetFuzzing.Console
                 return _reader.ReadToEnd();
             }
 
+            public string ReadLine()
+            {
+                if (_reader == null)
+                {
+                    _reader = new StreamReader(_fileStream, _encoding);
+                }
+                return _reader.ReadLine();
+            }
+
             public long Seek(long position)
             {
                 return _fileStream.Seek(position, SeekOrigin.Begin);

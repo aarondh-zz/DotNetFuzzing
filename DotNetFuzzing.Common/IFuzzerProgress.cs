@@ -13,6 +13,8 @@ namespace DotNetFuzzing.Common
         int QueueIndex { get; }
         string StageName { get; }
         string StageShortName { get; }
+        int StageCurrent { get; }
+        int StageMax { get; }
         int CurrentStageByte { get; }
         int CurrentStageValue { get; }
     }

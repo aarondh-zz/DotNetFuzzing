@@ -1,8 +1,9 @@
-﻿using System;
+﻿using DotNetFuzzing.Common;
+using System;
 
 namespace DotNetFuzzing.Fuzzing.Internal.Models
 {
-    public class FuzzerStatistics
+    public class FuzzerStatistics : IFuzzerStatistics
     {
         public int? CurrentPath { get; set; }
         public DateTime? start_time { get; set; }

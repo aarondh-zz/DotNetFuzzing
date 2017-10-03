@@ -111,9 +111,11 @@
     <Compile Include="IFileInfo.cs" />
     <Compile Include="IFileSystem.cs" />
     <Compile Include="IFuzzerSettings.cs" />
+    <Compile Include="IFuzzerStatistics.cs" />
     <Compile Include="ILogger.cs" />
     <Compile Include="IFuzzerProgress.cs" />
-    <Compile Include="IProgressMonitor.cs" />
+    <Compile Include="IStatisticsListener.cs" />
+    <Compile Include="IProgressListener.cs" />
     <Compile Include="IRunResult.cs" />
     <Compile Include="IStream.cs" />
     <Compile Include="ITargetInitiator.cs" />

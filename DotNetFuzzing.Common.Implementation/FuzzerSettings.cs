@@ -29,7 +29,8 @@ namespace DotNetFuzzing.Common.Implementation
             }
         }
 
-        public string ExtrasDirectory{ get; set; }
+        public string ExtrasDirectory { get; set; }
+        public int DictionaryLevel { get; set; }
 
         public string MasterSyncId{ get; set; }
 
@@ -88,7 +89,8 @@ namespace DotNetFuzzing.Common.Implementation
         public IFileSystem FileSystem{ get; set; }
 
         public ITargetInitiator TargetInitiator { get; set; }
-        public IProgressMonitor ProgressMonitor { get; set; }
+        public IProgressListener ProgressListener { get; set; }
+        public IStatisticsListener StatisticsListener { get; set; }
 
         public long MaxFileSize{ get; set; }
 

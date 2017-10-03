@@ -11,10 +11,16 @@ namespace DotNetFuzzing.Common
         void Close();
 
         void Flush();
+
         int Read(byte[] buffer, int offset, int count);
+
         int Write(byte[] buffer, int offset, int count);
+
         void Write(string text);
+
         string ReadToEnd();
+
+        string ReadLine();
 
         long Length { get;  }
 
